@@ -74,6 +74,10 @@ class Settings(BaseSettings):
     agent_max_iterations: int = Field(default=10, description="Max ReAct loop iterations")
     agent_memory_window: int = Field(default=20, description="Short-term memory window size")
     agent_debug: bool = Field(default=True, description="Enable debug logging")
+    agent_backend: str = Field(
+        default="handmade",
+        description="Main agent backend: handmade (own ReAct) or agentscope (AgentScope 2.0)",
+    )
 
     # =================================================================
     # Database 相关配置（PostgreSQL）

@@ -24,7 +24,7 @@ import uuid
 from flask import Blueprint, jsonify, request
 from pydantic import ValidationError
 
-from src.agents.coordinator_agent import CoordinatorAgent
+from src.agents.factory import MainAgent, create_main_agent, display_agent_name, get_backend
 from src.api.models import ChatRequest, ChatResponse, HealthResponse
 from src.database import init_db
 from src.utils.exceptions import MaxIterationsError
@@ -39,7 +39,7 @@ bp = Blueprint("api", __name__)
 # 全局状态
 # =====================================================================
 # 按 session_id 缓存主 Agent：同一会话复用（记忆连续），不同会话隔离
-_agents: dict[str, CoordinatorAgent] = {}
+_agents: dict[str, MainAgent] = {}
 _db_initialized = False
 
 
@@ -56,16 +56,17 @@ def _ensure_db() -> bool:
     return True
 
 
-def get_or_create_agent(session_id: str) -> CoordinatorAgent:
+def get_or_create_agent(session_id: str) -> MainAgent:
     """
-    按 session_id 获取或创建主 Agent（Coordinator）。
+    按 session_id 获取或创建主 Agent。
 
     同一 session_id 复用同一个主 Agent → 记忆连续。
     不同 session_id 创建新实例 → 记忆隔离。
+    具体实现由 AGENT_BACKEND 决定（handmade / agentscope）。
     """
     if session_id not in _agents:
-        logger.info("Creating CoordinatorAgent for session=%s", session_id[:8])
-        _agents[session_id] = CoordinatorAgent(session_id=session_id)
+        logger.info("Creating main agent for session=%s", session_id[:8])
+        _agents[session_id] = create_main_agent(session_id=session_id)
     return _agents[session_id]
 
 
@@ -76,6 +77,7 @@ def index():
         "name": "My Agent API",
         "version": "0.1.0",
         "mode": "multi-agent",
+        "backend": get_backend(),
         "endpoints": {
             "health": "GET /health",
             "chat": "POST /chat",
@@ -90,9 +92,10 @@ def health():
     db_ok = _ensure_db()
     body = HealthResponse(
         status="ok",
-        agent="CoordinatorAgent",
+        agent=display_agent_name(),
         database="connected" if db_ok else "unavailable",
         sub_agents=["math_agent", "writer_agent", "general_agent"],
+        backend=get_backend(),
     )
     return jsonify(body.model_dump())
 
@@ -109,6 +112,7 @@ def docs():
         "title": "My Agent API",
         "version": "0.1.0",
         "mode": "multi-agent",
+        "backend": get_backend(),
         "framework": "Flask",
         "endpoints": [
             {

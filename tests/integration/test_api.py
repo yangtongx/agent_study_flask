@@ -7,6 +7,7 @@ API 端到端测试 — 用 Mock LLM 验证完整 HTTP 链路。
 import pytest
 
 from src.agents.coordinator_agent import CoordinatorAgent
+from src.agents.factory import display_agent_name, get_backend
 from src.api.routes import _agents
 from server import app
 
@@ -61,6 +62,7 @@ def test_index(client):
     data = resp.get_json()
     assert data["name"] == "My Agent API"
     assert data["mode"] == "multi-agent"
+    assert data["backend"] in ("handmade", "agentscope")
 
 
 def test_health(client):
@@ -69,8 +71,9 @@ def test_health(client):
     data = resp.get_json()
     assert "status" in data
     assert "database" in data
-    assert data["agent"] == "CoordinatorAgent"
+    assert data["agent"] == display_agent_name()
     assert "math_agent" in data["sub_agents"]
+    assert data["backend"] == get_backend()
 
 
 def test_docs(client):

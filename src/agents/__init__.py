@@ -19,6 +19,7 @@ Python 会先执行这个文件，把 BaseAgent、ReactAgent 和 CoordinatorAgen
 # 从 base_agent 模块导入 BaseAgent 基类
 from src.agents.base_agent import BaseAgent
 from src.agents.coordinator_agent import CoordinatorAgent
+from src.agents.factory import create_main_agent
 from src.agents.react_agent import ReactAgent
 
-__all__ = ["BaseAgent", "ReactAgent", "CoordinatorAgent"]
+__all__ = ["BaseAgent", "ReactAgent", "CoordinatorAgent", "create_main_agent"]

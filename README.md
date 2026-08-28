@@ -25,12 +25,16 @@
 16. [怎么跑测试](#16-怎么跑测试)
 17. [常见问题](#17-常见问题)
 18. [对照表：名词 ↔ 代码文件](#18-对照表名词--代码文件)
+19. [AgentScope 2.0：同一套分工，换一套发动机](#19-agentscope-20同一套分工换一套发动机)
 
 ---
 
 ## 1. 一句话：这项目是干什么的
 
 这是一个**教学用的多 Agent 框架**（一个主 Agent 调度多个子 Agent）。
+
+默认走**手写 ReAct**（自己解析 `Thought` / `Action` / `Final Answer`）。  
+同一套「主管 + 三个专家」也可以切到 **AgentScope 2.0**（官方框架，原生 tool calling），见第 19 节。
 
 普通聊天机器人：你问一句，模型直接回一句。
 
@@ -60,6 +64,8 @@
 | **ReAct** | Agent 的一种工作方式：Thought → Action → Observation，循环直到给出 Final Answer。 |
 | **Tool（工具）** | Agent 的「手」。计算器是一种工具；**子 Agent 也被包装成工具**给主 Agent 调用。 |
 | **主 Agent / 子 Agent** | 主 Agent（Coordinator）只负责分活；子 Agent 是数学、写作、通用三个专家。 |
+| **AgentScope** | 阿里开源的 Agent 框架。本项目用 2.0 的 `Agent` + `Toolkit` 作为**可选后端**，和手写 ReAct 对照学习。 |
+| **AGENT_BACKEND** | `.env` 里的开关：`handmade`（默认）或 `agentscope`。 |
 | **Memory（记忆）** | 对话历史。没有记忆，Agent 下一句就忘了你刚才说了什么。 |
 | **session_id** | 一次对话的身份证。同一个 `session_id` = 同一段聊天记录。 |
 | **Prompt（提示词）** | 发给 LLM 的说明书，告诉它「你是谁、有哪些工具、必须按什么格式回答」。 |
@@ -138,14 +144,16 @@ Action[calculator](15 * 23)
 | 1 | 本 README | 全貌 |
 | 2 | `main.py` | 命令行怎么启动一轮对话 |
 | 3 | `server.py` | HTTP 服务怎么起来 |
-| 4 | `src/agents/coordinator_agent.py` | **多 Agent 入口**：主 Agent 怎么分活 |
-| 5 | `src/tools/delegate.py` | 子 Agent 如何被包装成工具 |
-| 6 | `src/agents/react_agent.py` | Agent 外壳：组装 LLM、工具、记忆 |
-| 7 | `src/core/agent_loop.py` | **最重要**：ReAct 循环到底怎么转 |
-| 8 | `src/tools/calculator.py` | 一个真正的工具长什么样 |
-| 9 | `src/llm/openai_client.py` | 怎么把消息发给 DeepSeek |
-| 10 | `src/memory/manager.py` | 记忆怎么存、怎么读 |
-| 11 | `src/api/routes.py` | `/chat` 接口怎么接到主 Agent |
+| 4 | `src/agents/coordinator_agent.py` | **多 Agent 入口（手写版）**：主 Agent 怎么分活 |
+| 4b | `src/agents/scope_coordinator.py` | **同一套分工的 AgentScope 2.0 版**（可选） |
+| 5 | `src/agents/factory.py` | `AGENT_BACKEND` 怎么在两套实现之间切换 |
+| 6 | `src/tools/delegate.py` | 子 Agent 如何被包装成工具 |
+| 7 | `src/agents/react_agent.py` | Agent 外壳：组装 LLM、工具、记忆 |
+| 8 | `src/core/agent_loop.py` | **最重要**：ReAct 循环到底怎么转 |
+| 9 | `src/tools/calculator.py` | 一个真正的工具长什么样 |
+| 10 | `src/llm/openai_client.py` | 怎么把消息发给 DeepSeek |
+| 11 | `src/memory/manager.py` | 记忆怎么存、怎么读 |
+| 12 | `src/api/routes.py` | `/chat` 接口怎么接到主 Agent |
 
 源码里大部分文件顶部都有「这个文件做什么」的中文注释，就是给初学者写的，可以对着看。
 
@@ -162,7 +170,8 @@ agent_study_flask/
 ├── .env                    真正生效的配置（不要提交到 Git）
 │
 ├── src/                    全部业务代码
-│   ├── agents/             主 Agent（Coordinator）+ 可复用的 ReactAgent
+│   ├── agents/             主 Agent（手写 Coordinator / AgentScope ScopeCoordinator）
+│   │                       + factory.py 按 AGENT_BACKEND 切换
 │   ├── core/               大脑引擎：AgentLoop（perceive → decide → act）
 │   ├── llm/                怎么调用大模型
 │   ├── tools/              计算器 + 委派工具（把子 Agent 当工具）
@@ -189,7 +198,7 @@ agent_study_flask/
 | `main.py` | `python main.py "15*23等于多少"` | 自己在终端里试 Agent |
 | `server.py` | `python server.py` | 给网页、Postman、其他程序调用 |
 
-CLI 每次都会 `CoordinatorAgent()` 新建一套主+子 Agent，**默认记不住上一次命令行对话**。  
+CLI 每次都会 `create_main_agent()` 新建一套主+子 Agent，**默认记不住上一次命令行对话**。  
 HTTP 接口可以通过同一个 `session_id` 把多轮对话串起来（只主 Agent 记会话；子 Agent 一次任务一结束就忘）。
 
 ### 5.2 核心类之间的关系
@@ -333,6 +342,7 @@ python server.py
 | `AGENT_MAX_ITERATIONS` | ReAct 最多转几圈 | `10` |
 | `AGENT_MEMORY_WINDOW` | 短期记忆最多留几条消息 | `20` |
 | `AGENT_DEBUG` | 是否打更详细日志 | `true` |
+| `AGENT_BACKEND` | 主 Agent 实现：`handmade` 或 `agentscope` | `handmade` |
 | `PG_URI` | PostgreSQL 连接串 | `postgresql://用户:密码@主机:5432/库名` |
 | `CHROMA_PERSIST_PATH` | 向量库路径（长期记忆预留） | `./data/chroma` |
 
@@ -611,6 +621,7 @@ pytest
 - `tests/unit/test_tools.py` — 计算器
 - `tests/unit/test_memory.py` — 短期记忆窗口
 - `tests/unit/test_multi_agent.py` — 主 Agent 委派给数学子 Agent
+- `tests/unit/test_agentscope.py` — AgentScope 工具包装 / 工厂切换（不调真实 LLM）
 - `tests/integration/test_agent_e2e.py` — Loop + 真计算器 + 假 LLM
 - `tests/integration/test_api.py` — HTTP `/`、`/health`、`/chat`
 
@@ -642,6 +653,9 @@ A：不会。只有主 Agent 开了会话记忆。子 Agent `use_memory=False`�
 **Q：代码里又是 OpenAI 又是 DeepSeek？**  
 A：HTTP 协议按 OpenAI Chat Completions 来写；默认配置指向 DeepSeek。换兼容该协议的其它厂商，改 `.env` 即可。
 
+**Q：handmade 和 agentscope 我该用哪个？**  
+A：先用 `handmade` 看懂 ReAct 循环（`agent_loop.py`）。想对照官方框架时，把 `.env` 里 `AGENT_BACKEND` 改成 `agentscope` 即可，Flask / 命令行入口不用改。
+
 ---
 
 ## 18. 对照表：名词 ↔ 代码文件
@@ -652,7 +666,9 @@ A：HTTP 协议按 OpenAI Chat Completions 来写；默认配置指向 DeepSeek�
 | HTTP 入口 | `server.py` |
 | 聊天接口 | `src/api/routes.py` |
 | 请求 JSON 长什么样 | `src/api/models.py` |
-| 主 Agent | `src/agents/coordinator_agent.py` |
+| 主 Agent（手写） | `src/agents/coordinator_agent.py` |
+| 主 Agent（AgentScope 2.0） | `src/agents/scope_coordinator.py` |
+| 两套后端怎么切换 | `src/agents/factory.py` |
 | Agent 外壳（专家也用它） | `src/agents/react_agent.py` |
 | 把子 Agent 当工具 | `src/tools/delegate.py` |
 | Agent 必须实现 run() | `src/agents/base_agent.py` |
@@ -686,3 +702,33 @@ A：HTTP 协议按 OpenAI Chat Completions 来写；默认配置指向 DeepSeek�
 7. 想加一个「查天气」子 Agent，最少要改哪几个文件？
 
 答不上来就回到第 4 节，对着源码再走一遍「一次对话的路径」。
+
+---
+
+## 19. AgentScope 2.0：同一套分工，换一套发动机
+
+手写版让你看清 ReAct **每一行代码**在干什么。  
+AgentScope 版让你看到：**同样的主管 + 三个专家，换成官方框架之后长什么样。**
+
+| | 手写 `handmade` | AgentScope `agentscope` |
+|---|---|---|
+| 主类 | `CoordinatorAgent` | `ScopeCoordinator` |
+| 循环 | `src/core/agent_loop.py` 自己解析文本 | `agentscope.agent.Agent.reply()` |
+| 工具调用 | LLM 写出 `Action[calculator](1+1)`，正则提取 | 模型原生 function calling（JSON Schema） |
+| 计算器 | `CalculatorTool` | 同一个计算器，用 `AllowFunctionTool` 包一层 |
+| 子 Agent | `DelegateTool` | `delegate_tool()` 里 `await sub_agent.reply(...)` |
+
+切换（改完重启 `python server.py` 或重新跑 `python main.py`）：
+
+```env
+AGENT_BACKEND=agentscope
+```
+
+改回手写：
+
+```env
+AGENT_BACKEND=handmade
+```
+
+注意：AgentScope 的普通 `FunctionTool` 默认权限是 **ASK**（每次用工具要人确认）。学习项目在 Flask 里没法弹窗，所以包装类 `AllowFunctionTool` 改成自动 **ALLOW**。这只适合计算器这种安全工具，不要照搬到会改文件、跑系统命令的工具上。
+

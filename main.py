@@ -5,7 +5,7 @@
 当你运行 `python main.py` 时，程序从这里开始执行。
 它会：
 1. 读取你在命令行输入的文字（或交互式输入）
-2. 创建一个 CoordinatorAgent（主 Agent，内部再调度子 Agent）
+2. 创建一个主 Agent（内部再调度子 Agent；实现由 AGENT_BACKEND 决定）
 3. 把你的输入交给 Agent 处理
 4. 打印 Agent 的回复
 
@@ -20,8 +20,8 @@ import asyncio
 # sys 用于读取命令行参数（sys.argv）
 import sys
 
-# 主 Agent：把任务分给数学 / 写作 / 通用子 Agent
-from src.agents.coordinator_agent import CoordinatorAgent
+# 主 Agent 工厂：按 AGENT_BACKEND 选择手写 ReAct 或 AgentScope 2.0
+from src.agents.factory import create_main_agent
 
 # 从工具模块导入日志函数，用于打印调试信息
 from src.utils.logger import get_logger
@@ -63,7 +63,7 @@ async def main(user_input: str | None = None) -> None:
     logger.info("Starting agent with input: %s", user_input[:100])
 
     # 创建主 Agent。内部会带上三个子 Agent（数学、写作、通用）
-    agent = CoordinatorAgent()
+    agent = create_main_agent()
 
     # 调用 agent 的 run 方法处理用户输入
     # await 表示等待异步操作完成（agent 内部会调用 LLM API）

@@ -44,3 +44,7 @@ class HealthResponse(BaseModel):
         default_factory=list,
         description="主 Agent 可调度的子 Agent 名称",
     )
+    backend: str = Field(
+        default="handmade",
+        description="主 Agent 实现：handmade 或 agentscope",
+    )

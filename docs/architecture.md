@@ -20,17 +20,22 @@ User
 
 子 Agent 通过 `DelegateTool` 伪装成主 Agent 的工具，因此不必改 `AgentLoop`。
 
+可选后端：`.env` 里 `AGENT_BACKEND=agentscope` 时，同一张分工图改由
+`ScopeCoordinator`（AgentScope 2.0 `Agent` + 原生 tool calling）执行。
+Flask / `main.py` 只调用 `create_main_agent()`，不关心具体实现。
+
 ## 模块依赖
 
 ```
 main.py / server.py
-  └── agents/coordinator_agent.py     ← 主 Agent
-        ├── tools/delegate.py         ← 把子 Agent 当工具
-        ├── agents/react_agent.py     ← 主/子共用外壳
-        └── core/agent_loop.py        ← 认知循环
-              ├── llm/                ← LLM 推理
-              ├── tools/calculator    ← 数学专家的手
-              └── memory/             ← 仅主 Agent 记会话
+  └── agents/factory.py                 ← AGENT_BACKEND 开关
+        ├── coordinator_agent.py        ← handmade：手写 ReAct
+        │     ├── tools/delegate.py
+        │     ├── agents/react_agent.py
+        │     └── core/agent_loop.py
+        └── scope_coordinator.py        ← agentscope：官方 Agent
+              ├── scope_tools.py        ← CalculatorTool + 子 Agent 适配
+              └── agentscope.agent.Agent
 ```
 
 ## 认知循环流程
@@ -46,4 +51,4 @@ main.py / server.py
 - **子 Agent 当工具**: 主循环无需知道「对方是 Agent 还是计算器」
 - **记忆隔离**: 只有 Coordinator 持有 session 记忆；专家 `use_memory=False`
 - **依赖注入**: Agent 接收 LLM/Tools/Memory，测试可注入假 LLM
-- **工厂模式**: LLMFactory 统一创建客户端
+- **工厂模式**: `create_main_agent()` 按 `AGENT_BACKEND` 选择手写或 AgentScope

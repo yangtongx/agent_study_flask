@@ -102,3 +102,15 @@ class SearchTool(BaseTool):
 
 1. 实现 `BaseLLMClient`
 2. 在 `LLMFactory.create()` 中注册
+
+### 切换到 AgentScope 2.0
+
+```python
+from src.agents.factory import create_main_agent
+
+# .env: AGENT_BACKEND=agentscope
+agent = create_main_agent(session_id="demo")
+answer = await agent.run("15 * 23 等于多少")
+```
+
+实现见 `src/agents/scope_coordinator.py`。分工与手写 `CoordinatorAgent` 相同。
