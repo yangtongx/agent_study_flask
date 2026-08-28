@@ -155,7 +155,7 @@ class AgentLoop:
                 # LLM 没有按格式输出，提醒它用正确格式
                 messages.append({
                     "role": "user",
-                    "content": "Please use the format: Action[tool_name](args)",
+                    "content": "请使用格式：Action[tool_name](args)",
                 })
                 continue  # 跳过本轮，进入下一轮循环
 
@@ -192,26 +192,28 @@ class AgentLoop:
         # 把每个工具的名称和描述拼成一段文字
         # 例如："- calculator: Perform mathematical calculations..."
         role = self.role_prompt.strip() or (
-            "You are a helpful AI Agent using the ReAct pattern."
+            "你是一个使用 ReAct 模式的 AI Agent。"
         )
         if self.tools:
             tool_desc = "\n".join(
                 f"  - {t.name}: {t.description}" for t in self.tools
             )
-            tools_section = f"Available tools:\n{tool_desc}"
+            tools_section = f"可用工具：\n{tool_desc}"
         else:
             tools_section = (
-                "You have no tools. Do not output Action. Always use Final Answer."
+                "你没有工具。不要输出 Action，直接使用 Final Answer。"
             )
+        # Thought / Action / Final Answer 必须保持英文：
+        # AgentLoop 用正则按这些词解析输出，改成中文会匹配失败。
         return (
             f"{role}\n"
             f"{tools_section}\n\n"
-            "Use this format:\n"
-            "Thought: <your reasoning>\n"
+            "每一步必须用下面两种格式之一（关键词保持英文）：\n"
+            "Thought: <你的思考>\n"
             "Action[<tool_name>](<args>)\n"
-            "OR\n"
-            "Thought: <your reasoning>\n"
-            "Final Answer: <your answer>\n"
+            "或者\n"
+            "Thought: <你的思考>\n"
+            "Final Answer: <给用户的答案>\n"
         )
 
     def _load_history(self) -> list[dict]:

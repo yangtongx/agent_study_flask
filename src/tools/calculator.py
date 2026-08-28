@@ -75,9 +75,9 @@ class CalculatorTool(BaseTool):
     def description(self) -> str:
         """工具描述，LLM 看了这个才知道什么时候该用计算器。"""
         return (
-            "Perform mathematical calculations. "
-            "Input: a math expression like '2 + 3 * 4'. "
-            "Supports: +, -, *, /, //, %, **, parentheses."
+            "做数学计算。"
+            "输入：算术表达式，例如 '2 + 3 * 4'。"
+            "支持：+, -, *, /, //, %, ** 和括号。"
         )
 
     async def run(self, args: str) -> str:

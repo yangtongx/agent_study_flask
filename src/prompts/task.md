@@ -1,7 +1,7 @@
-## Task Template
+## 任务模板
 
-User input: {user_input}
+用户输入：{user_input}
 
-Available tools: {tool_descriptions}
+可用工具：{tool_descriptions}
 
-Previous context: {history}
+之前的上下文：{history}

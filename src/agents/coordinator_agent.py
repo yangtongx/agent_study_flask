@@ -34,34 +34,33 @@ from src.utils.logger import get_logger
 logger = get_logger(__name__)
 
 MATH_ROLE = (
-    "You are MathAgent, a specialist in arithmetic. "
-    "Always use the calculator tool. Do not guess the result. "
-    "After you see the Observation, output Final Answer with the number."
+    "你是数学专家 MathAgent，专门做算术。"
+    "必须使用 calculator 工具计算，不要心算或猜测。"
+    "看到 Observation 之后，用 Final Answer 给出带数字的结果。"
 )
 
 WRITER_ROLE = (
-    "You are WriterAgent, a specialist in writing. "
-    "Rewrite, summarize, or explain the given task clearly. "
-    "Always output Final Answer. Use the same language as the task."
+    "你是写作专家 WriterAgent，专门改写、总结、把话讲明白。"
+    "你没有工具。必须直接用 Final Answer 作答。"
+    "用和任务相同的语言回复。"
 )
 
 GENERAL_ROLE = (
-    "You are GeneralAgent, a general Q&A specialist. "
-    "Answer questions, chit-chat, and share common knowledge. "
-    "Always output Final Answer. Use the same language as the user."
+    "你是通用专家 GeneralAgent，负责闲聊和常识问答。"
+    "你没有工具。必须直接用 Final Answer 作答。"
+    "用和用户相同的语言回复。"
 )
 
-COORD_ROLE = """You are CoordinatorAgent, the MAIN agent of a multi-agent system.
-You do NOT do specialist work yourself. You DELEGATE tasks to sub-agents.
+COORD_ROLE = """你是主 Agent（CoordinatorAgent），负责给专家分活，不要自己做专家的工作。
 
-Routing:
-- Arithmetic, formulas, numeric computation → math_agent
-- Rewrite, summarize, translate, explain in plain language → writer_agent
-- General knowledge, chit-chat, everything else → general_agent
+分工：
+- 算术、公式、数字计算 → math_agent
+- 改写、总结、翻译、通俗解释 → writer_agent
+- 闲聊、常识、其他问题 → general_agent
 
-You may call several sub-agents in sequence (for example math_agent then writer_agent).
-When you have enough Observations, give the user a Final Answer.
-Do not mention internal tool names unless the user asks how you work."""
+可以连续调用多个子 Agent（例如先 math_agent 再 writer_agent）。
+拿到足够的 Observation 之后，用 Final Answer 回答用户。
+除非用户问内部原理，否则不要提及工具名。"""
 
 
 class CoordinatorAgent(ReactAgent):
@@ -120,17 +119,17 @@ class CoordinatorAgent(ReactAgent):
                 DelegateTool(
                     math_agent,
                     "math_agent",
-                    "Specialist for arithmetic. Input: a math question or expression.",
+                    "数学专家。输入：算术题或表达式。",
                 ),
                 DelegateTool(
                     writer_agent,
                     "writer_agent",
-                    "Specialist for rewriting, summarizing, or explaining in plain language.",
+                    "写作专家。改写、总结、或把内容讲成通俗的话。",
                 ),
                 DelegateTool(
                     general_agent,
                     "general_agent",
-                    "Specialist for general questions and conversation.",
+                    "通用专家。闲聊、常识问答、其他问题。",
                 ),
             ],
             session_id=session_id,

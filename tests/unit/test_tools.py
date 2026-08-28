@@ -43,5 +43,5 @@ def test_calculator_name_and_description():
     """测试工具的元信息（name 和 description 属性）。"""
     calc = CalculatorTool()
     assert calc.name == "calculator"
-    # description 中应该包含 "math"
-    assert "math" in calc.description.lower()
+    # description 要让 LLM 知道这是计算器
+    assert "数学" in calc.description
