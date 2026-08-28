@@ -62,6 +62,23 @@ class BaseLLMClient(ABC):
 
 ## 扩展指南
 
+### 添加新子 Agent
+
+```python
+from src.agents.react_agent import ReactAgent
+from src.tools.delegate import DelegateTool
+
+weather = ReactAgent(
+    name="WeatherAgent",
+    tools=[],          # 或挂上天气工具
+    use_memory=False,
+    role_prompt="You are WeatherAgent. ...",
+)
+
+# 加入 CoordinatorAgent 的 tools 列表：
+DelegateTool(weather, "weather_agent", "Look up weather for a city.")
+```
+
 ### 添加新工具
 
 ```python

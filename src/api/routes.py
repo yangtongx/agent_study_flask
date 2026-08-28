@@ -24,11 +24,9 @@ import uuid
 from flask import Blueprint, jsonify, request
 from pydantic import ValidationError
 
-from src.agents.react_agent import ReactAgent
+from src.agents.coordinator_agent import CoordinatorAgent
 from src.api.models import ChatRequest, ChatResponse, HealthResponse
-from src.core.agent_loop import AgentLoop
 from src.database import init_db
-from src.tools.calculator import CalculatorTool
 from src.utils.exceptions import MaxIterationsError
 from src.utils.logger import get_logger
 
@@ -40,9 +38,8 @@ bp = Blueprint("api", __name__)
 # =====================================================================
 # 全局状态
 # =====================================================================
-# 按 session_id 缓存 Agent 实例：同一会话复用 Agent（保持记忆连续性）
-# 不同 session 各自独立，互不干扰
-_agents: dict[str, ReactAgent] = {}
+# 按 session_id 缓存主 Agent：同一会话复用（记忆连续），不同会话隔离
+_agents: dict[str, CoordinatorAgent] = {}
 _db_initialized = False
 
 
@@ -59,33 +56,16 @@ def _ensure_db() -> bool:
     return True
 
 
-def get_or_create_agent(session_id: str) -> ReactAgent:
+def get_or_create_agent(session_id: str) -> CoordinatorAgent:
     """
-    按 session_id 获取或创建 Agent。
+    按 session_id 获取或创建主 Agent（Coordinator）。
 
-    同一 session_id 复用同一个 Agent 实例 → 记忆连续。
-    不同 session_id 创建新 Agent → 记忆隔离。
+    同一 session_id 复用同一个主 Agent → 记忆连续。
+    不同 session_id 创建新实例 → 记忆隔离。
     """
     if session_id not in _agents:
-        logger.info("Creating new Agent for session=%s", session_id[:8])
-        agent = ReactAgent.__new__(ReactAgent)
-
-        from src.agents.base_agent import BaseAgent
-        from src.llm.factory import LLMFactory
-        from src.memory.manager import MemoryManager
-
-        BaseAgent.__init__(agent, name="ReactAgent")
-        agent.llm_client = LLMFactory.create()
-        agent.tools = [CalculatorTool()]
-        agent.memory = MemoryManager(session_id=session_id)
-        agent.max_iterations = 10
-        agent.loop = AgentLoop(
-            llm_client=agent.llm_client,
-            tools=agent.tools,
-            memory=agent.memory,
-            max_iterations=agent.max_iterations,
-        )
-        _agents[session_id] = agent
+        logger.info("Creating CoordinatorAgent for session=%s", session_id[:8])
+        _agents[session_id] = CoordinatorAgent(session_id=session_id)
     return _agents[session_id]
 
 
@@ -95,6 +75,7 @@ def index():
     return jsonify({
         "name": "My Agent API",
         "version": "0.1.0",
+        "mode": "multi-agent",
         "endpoints": {
             "health": "GET /health",
             "chat": "POST /chat",
@@ -109,8 +90,9 @@ def health():
     db_ok = _ensure_db()
     body = HealthResponse(
         status="ok",
-        agent="ReactAgent",
+        agent="CoordinatorAgent",
         database="connected" if db_ok else "unavailable",
+        sub_agents=["math_agent", "writer_agent", "general_agent"],
     )
     return jsonify(body.model_dump())
 
@@ -126,6 +108,7 @@ def docs():
     return jsonify({
         "title": "My Agent API",
         "version": "0.1.0",
+        "mode": "multi-agent",
         "framework": "Flask",
         "endpoints": [
             {

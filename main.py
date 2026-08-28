@@ -5,7 +5,7 @@
 当你运行 `python main.py` 时，程序从这里开始执行。
 它会：
 1. 读取你在命令行输入的文字（或交互式输入）
-2. 创建一个 ReactAgent 实例
+2. 创建一个 CoordinatorAgent（主 Agent，内部再调度子 Agent）
 3. 把你的输入交给 Agent 处理
 4. 打印 Agent 的回复
 
@@ -20,9 +20,8 @@ import asyncio
 # sys 用于读取命令行参数（sys.argv）
 import sys
 
-# 从我们的 src/agents/ 目录导入 ReactAgent 类
-# ReactAgent 是一个基于 ReAct 模式的 AI Agent 实现
-from src.agents.react_agent import ReactAgent
+# 主 Agent：把任务分给数学 / 写作 / 通用子 Agent
+from src.agents.coordinator_agent import CoordinatorAgent
 
 # 从工具模块导入日志函数，用于打印调试信息
 from src.utils.logger import get_logger
@@ -63,9 +62,8 @@ async def main(user_input: str | None = None) -> None:
     # %s 是日志格式化占位符，会被 user_input[:100] 替换
     logger.info("Starting agent with input: %s", user_input[:100])
 
-    # 创建一个 ReactAgent 实例
-    # ReactAgent 内部会自动初始化 LLM 客户端、工具列表、记忆系统
-    agent = ReactAgent()
+    # 创建主 Agent。内部会带上三个子 Agent（数学、写作、通用）
+    agent = CoordinatorAgent()
 
     # 调用 agent 的 run 方法处理用户输入
     # await 表示等待异步操作完成（agent 内部会调用 LLM API）

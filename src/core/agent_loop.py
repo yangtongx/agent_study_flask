@@ -83,6 +83,9 @@ class AgentLoop:
     tools: list[BaseTool] = field(default_factory=list)
     memory: MemoryManager | None = None
     max_iterations: int = 10
+    # 角色说明：主 Agent / 子 Agent 可以写成不同的人设
+    # 空字符串则用默认的 "helpful ReAct Agent"
+    role_prompt: str = ""
 
     # 记录上次 execute() 实际执行了多少轮循环
     # 供 API 层查询并返回给调用方
@@ -188,13 +191,21 @@ class AgentLoop:
         """
         # 把每个工具的名称和描述拼成一段文字
         # 例如："- calculator: Perform mathematical calculations..."
-        tool_desc = "\n".join(
-            f"  - {t.name}: {t.description}" for t in self.tools
+        role = self.role_prompt.strip() or (
+            "You are a helpful AI Agent using the ReAct pattern."
         )
+        if self.tools:
+            tool_desc = "\n".join(
+                f"  - {t.name}: {t.description}" for t in self.tools
+            )
+            tools_section = f"Available tools:\n{tool_desc}"
+        else:
+            tools_section = (
+                "You have no tools. Do not output Action. Always use Final Answer."
+            )
         return (
-            "You are a helpful AI Agent using the ReAct pattern.\n"
-            "Available tools:\n"
-            f"{tool_desc}\n\n"
+            f"{role}\n"
+            f"{tools_section}\n\n"
             "Use this format:\n"
             "Thought: <your reasoning>\n"
             "Action[<tool_name>](<args>)\n"

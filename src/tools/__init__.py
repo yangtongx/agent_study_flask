@@ -13,5 +13,6 @@ LLM 决定用哪个工具、传什么参数，工具执行后把结果返回给 
 
 from src.tools.base_tool import BaseTool
 from src.tools.calculator import CalculatorTool
+from src.tools.delegate import DelegateTool
 
-__all__ = ["BaseTool", "CalculatorTool"]
+__all__ = ["BaseTool", "CalculatorTool", "DelegateTool"]

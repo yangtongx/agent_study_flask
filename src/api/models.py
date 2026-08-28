@@ -40,3 +40,7 @@ class HealthResponse(BaseModel):
     status: str = Field(description="服务状态")
     agent: str = Field(description="Agent 名称")
     database: str = Field(description="数据库连接状态")
+    sub_agents: list[str] = Field(
+        default_factory=list,
+        description="主 Agent 可调度的子 Agent 名称",
+    )

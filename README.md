@@ -30,18 +30,17 @@
 
 ## 1. 一句话：这项目是干什么的
 
-这是一个**教学用的 AI Agent 框架**。
+这是一个**教学用的多 Agent 框架**（一个主 Agent 调度多个子 Agent）。
 
 普通聊天机器人：你问一句，模型直接回一句。
 
-这个项目里的 Agent 会多几步：
+这个项目里，**主 Agent 不自己包办所有事**，而是先判断该找哪位「专家」：
 
-1. **想一想**（Thought）：这件事要不要用工具？
-2. **动手做**（Action）：比如调用计算器算 `15 * 23`
-3. **看结果**（Observation）：计算器返回 `345`
-4. **给出最终答案**（Final Answer）：告诉你 `15 * 23 = 345`
+1. 算术 → 交给 **math_agent**（它会用计算器）
+2. 改写 / 总结 / 通俗解释 → 交给 **writer_agent**
+3. 闲聊、常识 → 交给 **general_agent**
 
-这种「先推理、再行动」的模式叫 **ReAct**（Reasoning + Acting）。
+每个 Agent 内部仍走 ReAct：**想一想 → 动手（工具或子 Agent）→ 看结果 → 最终答案**。
 
 你可以：
 
@@ -59,7 +58,8 @@
 | **LLM** | Large Language Model，大语言模型。就是 ChatGPT、DeepSeek 这类能生成文字的模型。本项目默认对接 **DeepSeek**（接口格式和 OpenAI 兼容）。 |
 | **Agent（智能体）** | 不只会说话，还会**自己决定调用工具**来完成任务的程序。 |
 | **ReAct** | Agent 的一种工作方式：Thought → Action → Observation，循环直到给出 Final Answer。 |
-| **Tool（工具）** | Agent 的「手」。现在项目里自带一个：计算器 `calculator`。 |
+| **Tool（工具）** | Agent 的「手」。计算器是一种工具；**子 Agent 也被包装成工具**给主 Agent 调用。 |
+| **主 Agent / 子 Agent** | 主 Agent（Coordinator）只负责分活；子 Agent 是数学、写作、通用三个专家。 |
 | **Memory（记忆）** | 对话历史。没有记忆，Agent 下一句就忘了你刚才说了什么。 |
 | **session_id** | 一次对话的身份证。同一个 `session_id` = 同一段聊天记录。 |
 | **Prompt（提示词）** | 发给 LLM 的说明书，告诉它「你是谁、有哪些工具、必须按什么格式回答」。 |
@@ -111,6 +111,22 @@ Action[calculator](15 * 23)
 真正执行计算的是你的 Python 代码 `CalculatorTool.run()`。  
 这就是 Agent 和「纯聊天模型」的核心区别：**模型负责决定，代码负责执行。**
 
+### 再升一级：公司里的主管 + 专家
+
+如果把上面的「助手」想成公司：
+
+```
+你（客户）
+   ↓
+主管 CoordinatorAgent（不自己算、不自己写长文，只分活）
+   ├── 数学专家 math_agent     → 只会算术，手里有计算器
+   ├── 写作专家 writer_agent   → 改写、总结、说人话
+   └── 通用专家 general_agent  → 闲聊、常识问答
+```
+
+主管眼里，子 Agent 和计算器是同一类东西：都是 `Action[名字](任务)`。  
+实现上就是 `src/tools/delegate.py`：把「调用另一个 Agent」伪装成普通工具。代码在 `src/agents/coordinator_agent.py`。
+
 ---
 
 ## 4. 建议阅读顺序
@@ -122,12 +138,14 @@ Action[calculator](15 * 23)
 | 1 | 本 README | 全貌 |
 | 2 | `main.py` | 命令行怎么启动一轮对话 |
 | 3 | `server.py` | HTTP 服务怎么起来 |
-| 4 | `src/agents/react_agent.py` | Agent 外壳：组装 LLM、工具、记忆 |
-| 5 | `src/core/agent_loop.py` | **最重要**：ReAct 循环到底怎么转 |
-| 6 | `src/tools/calculator.py` | 一个工具长什么样 |
-| 7 | `src/llm/openai_client.py` | 怎么把消息发给 DeepSeek |
-| 8 | `src/memory/manager.py` | 记忆怎么存、怎么读 |
-| 9 | `src/api/routes.py` | `/chat` 接口怎么接到 Agent |
+| 4 | `src/agents/coordinator_agent.py` | **多 Agent 入口**：主 Agent 怎么分活 |
+| 5 | `src/tools/delegate.py` | 子 Agent 如何被包装成工具 |
+| 6 | `src/agents/react_agent.py` | Agent 外壳：组装 LLM、工具、记忆 |
+| 7 | `src/core/agent_loop.py` | **最重要**：ReAct 循环到底怎么转 |
+| 8 | `src/tools/calculator.py` | 一个真正的工具长什么样 |
+| 9 | `src/llm/openai_client.py` | 怎么把消息发给 DeepSeek |
+| 10 | `src/memory/manager.py` | 记忆怎么存、怎么读 |
+| 11 | `src/api/routes.py` | `/chat` 接口怎么接到主 Agent |
 
 源码里大部分文件顶部都有「这个文件做什么」的中文注释，就是给初学者写的，可以对着看。
 
@@ -144,10 +162,10 @@ agent_study_flask/
 ├── .env                    真正生效的配置（不要提交到 Git）
 │
 ├── src/                    全部业务代码
-│   ├── agents/             Agent「人设」：ReactAgent 继承 BaseAgent
+│   ├── agents/             主 Agent（Coordinator）+ 可复用的 ReactAgent
 │   ├── core/               大脑引擎：AgentLoop（perceive → decide → act）
 │   ├── llm/                怎么调用大模型
-│   ├── tools/              工具（目前只有计算器）
+│   ├── tools/              计算器 + 委派工具（把子 Agent 当工具）
 │   ├── memory/             短期记忆 + 长期记忆（长期还是空壳）
 │   ├── database/           PostgreSQL：把对话存进数据库
 │   ├── api/                Flask 的路由和请求/响应格式
@@ -171,8 +189,8 @@ agent_study_flask/
 | `main.py` | `python main.py "15*23等于多少"` | 自己在终端里试 Agent |
 | `server.py` | `python server.py` | 给网页、Postman、其他程序调用 |
 
-CLI 每次都会 `ReactAgent()` 新建一个 Agent，**默认记不住上一次命令行对话**（每次新的 `session_id`）。  
-HTTP 接口可以通过同一个 `session_id` 把多轮对话串起来。
+CLI 每次都会 `CoordinatorAgent()` 新建一套主+子 Agent，**默认记不住上一次命令行对话**。  
+HTTP 接口可以通过同一个 `session_id` 把多轮对话串起来（只主 Agent 记会话；子 Agent 一次任务一结束就忘）。
 
 ### 5.2 核心类之间的关系
 
@@ -183,20 +201,21 @@ HTTP 接口可以通过同一个 `session_id` 把多轮对话串起来。
   main.py  或  server.py → routes.py
         │
         ▼
-   ReactAgent.run(用户那句话)
+   CoordinatorAgent.run(...)          ← 主 Agent
         │
-        ▼
-   AgentLoop.execute(...)          ← 真正转圈的地方
-        │
-        ├── LLMFactory.create() → OpenAIClient.chat()   ← 「想」
-        ├── CalculatorTool.run()                        ← 「做」
-        └── MemoryManager                               ← 「记」
-                 ├── ShortTermMemory（内存，最近 N 条）
-                 └── ChatHistoryRepo（PostgreSQL，持久化）
+        ├── DelegateTool → MathAgent → CalculatorTool
+        ├── DelegateTool → WriterAgent
+        └── DelegateTool → GeneralAgent
+                │
+                ▼
+         每个 Agent 内部都是 AgentLoop（ReAct 转圈）
+                ├── LLM 思考
+                └── 工具或 Final Answer
 ```
 
-`ReactAgent` 可以理解成**外壳**：把零件拼好。  
-`AgentLoop` 才是**发动机**：按 ReAct 规则一轮一轮跑。
+`CoordinatorAgent` / `ReactAgent` 是**外壳**：把零件拼好。  
+`AgentLoop` 才是**发动机**：按 ReAct 规则一轮一轮跑。  
+`DelegateTool` 让主 Agent 用调用工具的方式去调用子 Agent。
 
 ---
 
@@ -209,26 +228,22 @@ HTTP 接口可以通过同一个 `session_id` 把多轮对话串起来。
 2. Pydantic 的 ChatRequest 校验：message 不能空，最长 10000 字
 3. routes.chat()
       - 没传 session_id → 自动生成一个 UUID
-      - get_or_create_agent(session_id) → 没有就新建 ReactAgent
+      - get_or_create_agent(session_id) → 没有就新建 CoordinatorAgent
 4. asyncio.run(agent.run(message))
       - Flask 路由是同步的，Agent 内部是异步的，所以包一层 asyncio.run
-      - 内部调用 loop.execute(message)
-5. AgentLoop.execute()
-      a. 拼 system prompt（告诉 LLM：你是 ReAct Agent，有 calculator 工具）
-      b. 从 MemoryManager 取出这个 session 的历史消息
-      c. 组成 messages 列表发给 LLM：
-            [system, ...历史..., 当前用户这句话]
-      d. 进入 for 循环（最多 AGENT_MAX_ITERATIONS 次，默认 10）
-            LLM 回复
-            ├─ 匹配到 "Final Answer: xxx" → 存记忆，返回 xxx
-            ├─ 匹配到 "Action[名字](参数)" → 找工具并 run()，把结果当 Observation 再问 LLM
-            └─ 两种格式都没有 → 提醒 LLM 按格式说话，进入下一轮
-      e. 10 轮还没 Final Answer → 抛 MaxIterationsError → HTTP 508
+5. 主 Agent 的 AgentLoop
+      a. system prompt 告诉它：你是主管，有 math/writer/general 三个子 Agent
+      b. 加载这个 session 的历史
+      c. LLM 可能输出 Action[math_agent](15 * 23)
+      d. DelegateTool 调用 MathAgent.run(...)
+           └─ 数学子 Agent 自己再转 ReAct：Action[calculator](...) → Final Answer
+      e. 主 Agent 看到 Observation 后给出 Final Answer
+      f. 转太多次 → MaxIterationsError → HTTP 508
 6. 返回 JSON：
-      { "answer": "...", "agent": "ReactAgent", "iterations": 2, "session_id": "..." }
+      { "answer": "...", "agent": "CoordinatorAgent", "iterations": 2, "session_id": "..." }
 ```
 
-命令行路径更短：`main.py` 直接 `ReactAgent().run(...)`，不经过 Flask，也没有多 session 复用。
+命令行路径更短：`main.py` 直接 `CoordinatorAgent().run(...)`，不经过 Flask，也没有多 session 复用。
 
 ---
 
@@ -338,8 +353,9 @@ DeepSeek 的接口和 OpenAI 的 Chat Completions 格式兼容，所以代码类
 ```json
 {
   "status": "ok",
-  "agent": "ReactAgent",
-  "database": "connected"
+  "agent": "CoordinatorAgent",
+  "database": "connected",
+  "sub_agents": ["math_agent", "writer_agent", "general_agent"]
 }
 ```
 
@@ -361,7 +377,7 @@ DeepSeek 的接口和 OpenAI 的 Chat Completions 格式兼容，所以代码类
 ```json
 {
   "answer": "15 * 23 = 345",
-  "agent": "ReactAgent",
+  "agent": "CoordinatorAgent",
   "iterations": 2,
   "session_id": "xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"
 }
@@ -425,7 +441,7 @@ LLM 一次能吃的文字有上限。窗口 = 只保留最近 N 条。
 - HTTP：`get_or_create_agent(session_id)` 按会话缓存 Agent。
 - 同一 `session_id` → 同一份记忆。
 - 不同 `session_id` → 互不干扰。
-- CLI 的 `ReactAgent()` 每次新建，相当于每次新开一个会话。
+- CLI 的 `CoordinatorAgent()` 每次新建，相当于每次新开一个会话。
 
 相关文件：
 
@@ -447,9 +463,12 @@ LLM 一次能吃的文字有上限。窗口 = 只保留最近 N 条。
 2. `description`：出现在 system prompt 里，LLM 靠它决定「该不该用我」
 3. `run(args)`：真正执行，返回字符串，作为 Observation
 
-目前唯一实现：`CalculatorTool`。
+目前两类工具：
 
-它**不用** Python 的 `eval()`（`eval` 能执行任意代码，危险）。  
+- `CalculatorTool`：数学专家用的真计算器
+- `DelegateTool`：主 Agent 用来呼叫子 Agent（不是真的去网上搜，只是 `await 子Agent.run()`）
+
+计算器**不用** Python 的 `eval()`（`eval` 能执行任意代码，危险）。  
 做法是：把 `"2 + 3 * 4"` 解析成语法树（AST），只允许 `+ - * / // % **` 和正负号。遇到函数调用、`import` 就拒绝。
 
 `AgentLoop` 找工具的方式很直接：遍历 `self.tools`，名字对上就 `await tool.run(args)`。  
@@ -549,11 +568,17 @@ HTTP 层会把 `MaxIterationsError` 变成 508，其它未捕获异常变成 500
 
 1. 在 `src/tools/` 新建文件，继承 `BaseTool`。
 2. 实现 `name`、`description`、`run`。
-3. 在创建 Agent 的地方把工具加进列表：
-   - CLI：`src/agents/react_agent.py` 的 `tools=[CalculatorTool(), 你的工具()]`
-   - HTTP：`src/api/routes.py` 的 `get_or_create_agent()` 里同样加上
+3. 把它交给**该用这个工具的那个 Agent**。例如计算器只给数学专家：
+   - `src/agents/coordinator_agent.py` 里创建 `MathAgent` 时的 `tools=[CalculatorTool(), 你的工具()]`
 
 `description` 要写清楚「干什么、参数长什么样」，否则 LLM 不知道什么时候该调用你。
+
+### 加一个新的子 Agent
+
+1. 用 `ReactAgent(name=..., tools=..., role_prompt=..., use_memory=False)` 创建一个专家。
+2. 用 `DelegateTool(子Agent, "英文名", "何时调用")` 包一层。
+3. 把这个 DelegateTool 加进 `CoordinatorAgent` 的 `tools=` 列表。
+4. 在 `COORD_ROLE` 里写一句路由规则（什么问题交给它）。
 
 ### 加一种新的大模型客户端
 
@@ -576,15 +601,16 @@ pytest
 
 测试**不会**真的去调 DeepSeek（那样又慢又花钱）。它们用假的 LLM：
 
-- 第一轮固定返回 `Action[calculator](15 * 23)`
-- 第二轮固定返回 `Final Answer: 15 * 23 = 345`
-- 计算器是真的，所以能验证「解析 Action → 执行工具 → 给出答案」整条链
+- 主 Agent 第一轮固定返回 `Action[math_agent](...)`
+- 数学子 Agent 再返回 `Action[calculator](...)`，然后 `Final Answer`
+- 计算器是真的，所以能验证「主 Agent 分活 → 子 Agent 用工具 → 汇总答案」
 
 主要文件：
 
 - `tests/unit/test_agent_loop.py` — 立刻给答案 / 超时抛错
 - `tests/unit/test_tools.py` — 计算器
 - `tests/unit/test_memory.py` — 短期记忆窗口
+- `tests/unit/test_multi_agent.py` — 主 Agent 委派给数学子 Agent
 - `tests/integration/test_agent_e2e.py` — Loop + 真计算器 + 假 LLM
 - `tests/integration/test_api.py` — HTTP `/`、`/health`、`/chat`
 
@@ -608,7 +634,10 @@ A：LLM 不一定每次都听话。system prompt 只是「强烈建议」。简�
 A：如果模型一直输出 Action 却不给 Final Answer，循环永不结束。`max_iterations` 是保险丝。
 
 **Q：CLI 第二句为什么不记得第一句？**  
-A：每次运行 `main.py` 都是新进程、新 `ReactAgent`、新 `session_id`。要用记忆，请走 HTTP 并固定 `session_id`。
+A：每次运行 `main.py` 都是新进程、新 `CoordinatorAgent`、新 `session_id`。要用记忆，请走 HTTP 并固定 `session_id`。
+
+**Q：主 Agent 和子 Agent 会不会把对话记混？**  
+A：不会。只有主 Agent 开了会话记忆。子 Agent `use_memory=False`，每次被叫只处理这一次任务。
 
 **Q：代码里又是 OpenAI 又是 DeepSeek？**  
 A：HTTP 协议按 OpenAI Chat Completions 来写；默认配置指向 DeepSeek。换兼容该协议的其它厂商，改 `.env` 即可。
@@ -623,7 +652,9 @@ A：HTTP 协议按 OpenAI Chat Completions 来写；默认配置指向 DeepSeek�
 | HTTP 入口 | `server.py` |
 | 聊天接口 | `src/api/routes.py` |
 | 请求 JSON 长什么样 | `src/api/models.py` |
-| Agent 外壳 | `src/agents/react_agent.py` |
+| 主 Agent | `src/agents/coordinator_agent.py` |
+| Agent 外壳（专家也用它） | `src/agents/react_agent.py` |
+| 把子 Agent 当工具 | `src/tools/delegate.py` |
 | Agent 必须实现 run() | `src/agents/base_agent.py` |
 | ReAct 循环 | `src/core/agent_loop.py` |
 | 调大模型 | `src/llm/openai_client.py` |
@@ -648,10 +679,10 @@ A：HTTP 协议按 OpenAI Chat Completions 来写；默认配置指向 DeepSeek�
 
 1. Agent 和普通聊天机器人差在哪一步？
 2. Thought / Action / Observation / Final Answer 分别是谁产生的？
-3. `ReactAgent` 和 `AgentLoop` 谁才是转圈的发动机？
-4. 为什么工具结果要再塞回 LLM，而不是直接把计算器结果返回给用户？
+3. 主 Agent 为什么不自己算数，而要叫 math_agent？
+4. `DelegateTool` 和 `CalculatorTool` 对主 Agent 来说有什么相同之处？
 5. `session_id` 不传会怎样？传同一个又会怎样？
 6. PostgreSQL 挂了，服务还能不能聊？
-7. 想加一个「查天气」工具，最少要改哪几个文件？
+7. 想加一个「查天气」子 Agent，最少要改哪几个文件？
 
 答不上来就回到第 4 节，对着源码再走一遍「一次对话的路径」。

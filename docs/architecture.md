@@ -2,36 +2,48 @@
 
 ## 概览
 
-My Agent 采用 **ReAct（Reasoning + Acting）** 模式，核心是一个认知循环：
+多 Agent + ReAct：
 
 ```
-User Input → [Perceive] → [Decide] → [Act] → [Observe] → ... → Final Answer
+User
+  → CoordinatorAgent（主：分活）
+       ├── math_agent     → CalculatorTool
+       ├── writer_agent   → 无工具，只生成文字
+       └── general_agent  → 无工具，只生成文字
 ```
+
+每个 Agent 内部仍是：
+
+```
+[Perceive] → [Decide] → [Act] → [Observe] → ... → Final Answer
+```
+
+子 Agent 通过 `DelegateTool` 伪装成主 Agent 的工具，因此不必改 `AgentLoop`。
 
 ## 模块依赖
 
 ```
-main.py
-  └── agents/react_agent.py
-        ├── core/agent_loop.py       ← 认知循环核心
-        │     ├── llm/               ← LLM 推理
-        │     ├── tools/             ← 工具执行
-        │     └── memory/           ← 历史记忆
-        ├── safety/                 ← 输入/输出过滤
-        └── cache/                  ← 响应缓存
+main.py / server.py
+  └── agents/coordinator_agent.py     ← 主 Agent
+        ├── tools/delegate.py         ← 把子 Agent 当工具
+        ├── agents/react_agent.py     ← 主/子共用外壳
+        └── core/agent_loop.py        ← 认知循环
+              ├── llm/                ← LLM 推理
+              ├── tools/calculator    ← 数学专家的手
+              └── memory/             ← 仅主 Agent 记会话
 ```
 
 ## 认知循环流程
 
-1. **Perceive**: 构建 system prompt + 加载历史记忆 + 用户输入
+1. **Perceive**: 构建 system prompt +（主 Agent）加载历史记忆 + 用户输入
 2. **Decide**: LLM 输出 `Thought + Action[tool](args)` 或 `Final Answer`
-3. **Act**: 解析 Action，调用对应工具
-4. **Observe**: 将工具返回结果作为 Observation 回传给 LLM
-5. **Loop**: 重复 2-4 直到输出 Final Answer 或达到 max_iterations
+3. **Act**: 解析 Action；若是 `math_agent` 则进入子 Agent 的循环
+4. **Observe**: 将工具或子 Agent 返回结果回传给当前 Agent 的 LLM
+5. **Loop**: 重复直到 Final Answer 或 max_iterations
 
 ## 设计原则
 
-- **依赖注入**: Agent 接收 LLM/Tools/Memory 实例，不硬编码
-- **工厂模式**: LLMFactory 统一创建客户端，切换模型只改配置
-- **安全第一**: InputFilter 防 injection，OutputFilter 做脱敏
-- **缓存优先**: ResponseCache 避免重复 API 调用
+- **子 Agent 当工具**: 主循环无需知道「对方是 Agent 还是计算器」
+- **记忆隔离**: 只有 Coordinator 持有 session 记忆；专家 `use_memory=False`
+- **依赖注入**: Agent 接收 LLM/Tools/Memory，测试可注入假 LLM
+- **工厂模式**: LLMFactory 统一创建客户端
