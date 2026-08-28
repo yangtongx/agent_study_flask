@@ -32,7 +32,7 @@ class MemoryManager:
     组合三层存储：
     1. 短期记忆（内存 deque）：快速访问最近对话
     2. PostgreSQL（持久化）：服务重启后历史不丢
-    3. 长期记忆（向量库 stub）：语义检索（预留）
+    3. 长期记忆（向量库 RAG）：语义检索知识文档
 
     Attributes:
         session_id: 当前会话 ID，用于区分不同对话。
@@ -61,7 +61,7 @@ class MemoryManager:
             window_size=window_size or settings.agent_memory_window
         )
 
-        # 长期记忆（向量库 stub）
+        # 长期记忆（RAG 向量库）
         self.long_term = LongTermMemory(
             persist_path=settings.chroma_persist_path
         )

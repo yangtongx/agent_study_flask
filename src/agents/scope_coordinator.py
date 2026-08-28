@@ -19,9 +19,10 @@ AgentScope 版（本文件）：
     用户
       ↓
     ScopeCoordinator（主：只分活）
-      ├── math_agent     算术，内部有计算器
-      ├── writer_agent   改写 / 总结
-      └── general_agent  闲聊、常识
+      ├── math_agent       算术，内部有计算器
+      ├── writer_agent     改写 / 总结
+      ├── knowledge_agent  查知识库（RAG）
+      └── general_agent    闲聊、常识
 
 === 例子 ===
 用户：15 乘 23 等于多少？
@@ -56,7 +57,7 @@ from agentscope.model import OpenAIChatModel
 # Toolkit：工具箱。Agent 能用哪些工具，全在这里注册
 from agentscope.tool import Toolkit
 
-from src.agents.scope_tools import calculator_tool, delegate_tool
+from src.agents.scope_tools import calculator_tool, delegate_tool, retrieve_tool
 from src.configs.settings import get_settings
 from src.utils.logger import get_logger
 
@@ -86,14 +87,21 @@ GENERAL_PROMPT = (
     "用和用户相同的语言回复。"
 )
 
+KNOWLEDGE_PROMPT = (
+    "你是知识专家 KnowledgeAgent，专门查知识库。"
+    "必须使用 retrieve 工具检索，不要凭记忆编造文档内容。"
+    "根据检索结果作答；如果没有相关内容，如实告诉用户知识库里没有。"
+)
+
 COORD_PROMPT = """你是主 Agent（ScopeCoordinator），负责给专家分活，不要自己做专家的工作。
 
 分工：
 - 算术、公式、数字计算 → math_agent
 - 改写、总结、翻译、通俗解释 → writer_agent
+- 问公司制度、项目说明、文档、知识库里的事实 → knowledge_agent
 - 闲聊、常识、其他问题 → general_agent
 
-可以连续调用多个子 Agent（例如先 math_agent 再 writer_agent）。
+可以连续调用多个子 Agent（例如先 knowledge_agent 再 writer_agent）。
 拿到足够结果之后，直接回答用户。
 除非用户问内部原理，否则不要提及工具名。"""
 
@@ -198,16 +206,24 @@ class ScopeCoordinator:
             toolkit=Toolkit(tools=[]),
             react_config=react,
         )
+        knowledge_agent = Agent(
+            name="KnowledgeAgent",
+            system_prompt=KNOWLEDGE_PROMPT,
+            model=chat_model,
+            toolkit=Toolkit(tools=[retrieve_tool()]),
+            react_config=react,
+        )
 
         # 给日志 / 健康检查用：主 Agent 能调度谁
         self.sub_agents = {
             "math_agent": math_agent,
             "writer_agent": writer_agent,
             "general_agent": general_agent,
+            "knowledge_agent": knowledge_agent,
         }
 
         # --- 主管 ---
-        # 主管的「工具」就是三个专家。delegate_tool 内部会调用子 Agent.reply()
+        # 主管的「工具」就是专家。delegate_tool 内部会调用子 Agent.reply()
         self._agent = Agent(
             name=self.name,
             system_prompt=COORD_PROMPT,
@@ -223,6 +239,11 @@ class ScopeCoordinator:
                         writer_agent,
                         "writer_agent",
                         "写作专家。改写、总结、或把内容讲成通俗的话。",
+                    ),
+                    delegate_tool(
+                        knowledge_agent,
+                        "knowledge_agent",
+                        "知识专家。查知识库：公司制度、项目说明、已灌入的文档。",
                     ),
                     delegate_tool(
                         general_agent,

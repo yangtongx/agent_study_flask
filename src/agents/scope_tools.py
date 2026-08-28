@@ -43,6 +43,7 @@ from agentscope.tool import FunctionTool
 
 # 复用本项目已经写好、用 AST 防注入的安全计算器
 from src.tools.calculator import CalculatorTool
+from src.tools.retrieve import RetrieveTool
 
 
 class AllowFunctionTool(FunctionTool):
@@ -145,7 +146,28 @@ def delegate_tool(agent: Any, name: str, description: str) -> AllowFunctionTool:
         return (text or "").strip() or "(empty reply)"
 
     # FunctionTool 默认用函数名当工具名。这里闭包函数都叫 _call，
-    # 必须手动改成 math_agent / writer_agent / general_agent，否则三个工具重名。
+    # 必须手动改成 math_agent / writer_agent 等，否则多个工具重名。
     _call.__name__ = name
     _call.__doc__ = description
     return AllowFunctionTool(_call, name=name, description=description)
+
+
+async def _retrieve(query: str) -> str:
+    """从知识库检索相关资料。
+
+    Args:
+        query: 要查的问题或关键词，例如 '年假有几天'。
+    """
+    return await RetrieveTool().run(query)
+
+
+def retrieve_tool() -> AllowFunctionTool:
+    """把本项目的 RetrieveTool 包装成 AgentScope 工具。"""
+    return AllowFunctionTool(
+        _retrieve,
+        name="retrieve",
+        description=(
+            "从知识库检索相关资料。"
+            "输入：要查的问题或关键词，例如 '年假有几天'。"
+        ),
+    )

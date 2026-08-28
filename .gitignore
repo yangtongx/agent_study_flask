@@ -27,6 +27,7 @@ env/
 
 # Data (运行时生成)
 data/chroma/
+data/rag/
 data/logs/
 data/cache/
 

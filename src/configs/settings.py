@@ -83,6 +83,20 @@ class Settings(BaseSettings):
     )
 
     # =================================================================
+    # RAG（检索增强生成）
+    # =================================================================
+    # 检索时返回几段；太多会占满 prompt，太少可能漏答案
+    rag_top_k: int = Field(default=3, description="How many chunks to retrieve")
+    rag_persist_path: str = Field(
+        default="./data/rag",
+        description="Directory for the JSON vector index",
+    )
+    rag_knowledge_dir: str = Field(
+        default="./data/knowledge",
+        description="Seed markdown/txt files ingested when the index is empty",
+    )
+
+    # =================================================================
     # Database 相关配置（PostgreSQL）
     # =================================================================
     pg_uri: str = Field(

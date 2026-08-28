@@ -44,6 +44,7 @@ def _inject_mock_agent(session_id: str):
         math_llm=math_llm,
         writer_llm=idle,
         general_llm=idle,
+        knowledge_llm=idle,
         max_iterations=5,
     )
     _agents[session_id] = agent
@@ -73,7 +74,9 @@ def test_health(client):
     assert "database" in data
     assert data["agent"] == display_agent_name()
     assert "math_agent" in data["sub_agents"]
+    assert "knowledge_agent" in data["sub_agents"]
     assert data["backend"] == get_backend()
+    assert "knowledge_chunks" in data
 
 
 def test_docs(client):
@@ -114,3 +117,33 @@ def test_chat_auto_session_id(client):
     assert resp.status_code in (200, 500)
     if resp.status_code == 200:
         assert "session_id" in resp.get_json()
+
+
+def test_knowledge_ingest_and_search(client, tmp_path, monkeypatch):
+    """POST 灌入 + GET 检索，不经过 LLM。"""
+    from src.rag.store import VectorStore, reset_vector_store
+
+    store = VectorStore(persist_path=str(tmp_path / "rag"))
+    reset_vector_store(store)
+    try:
+        resp = client.post("/knowledge", json={
+            "content": "正式员工每年享有 10 个工作日年假。",
+            "source": "leave-policy.md",
+        })
+        assert resp.status_code == 200
+        data = resp.get_json()
+        assert data["chunks"] >= 1
+        assert data["total"] >= 1
+
+        search = client.get("/knowledge/search", query_string={"q": "年假几天", "top_k": 1})
+        assert search.status_code == 200
+        hits = search.get_json()["hits"]
+        assert hits
+        assert "10" in hits[0]["text"]
+    finally:
+        reset_vector_store(None)
+
+
+def test_knowledge_search_requires_q(client):
+    resp = client.get("/knowledge/search")
+    assert resp.status_code == 422

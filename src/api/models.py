@@ -49,3 +49,29 @@ class HealthResponse(BaseModel):
         default="handmade",
         description="主 Agent 实现：handmade 或 agentscope",
     )
+    knowledge_chunks: int = Field(
+        default=0,
+        description="向量知识库当前片段数量",
+    )
+
+
+class KnowledgeIngestRequest(BaseModel):
+    """灌入知识的请求。"""
+
+    content: str = Field(..., min_length=1, max_length=100000, description="要写入知识库的正文")
+    source: str | None = Field(default="api", description="来源标记，例如文件名")
+
+
+class KnowledgeIngestResponse(BaseModel):
+    """灌入结果。"""
+
+    chunks: int = Field(description="本次新写入的片段数")
+    source: str = Field(description="来源标记")
+    total: int = Field(description="知识库当前总片段数")
+
+
+class KnowledgeSearchResponse(BaseModel):
+    """直接检索（不经过 Agent）的结果，方便调试 RAG。"""
+
+    query: str
+    hits: list[dict]

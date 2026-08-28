@@ -7,7 +7,7 @@ Memory 模块 — 短期/长期记忆系统。
 
 === 两种记忆 ===
 1. 短期记忆：记住最近几轮对话（就像你脑子里的临时便签）
-2. 长期记忆：记住很久以前的知识（就像你的笔记本或数据库）
+2. 长期记忆：记住很久以前的知识（向量库 RAG，见 src/rag/）
 """
 
 from src.memory.manager import MemoryManager

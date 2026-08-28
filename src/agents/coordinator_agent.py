@@ -6,9 +6,10 @@
     用户
       ↓
     CoordinatorAgent（主：只负责分活，自己不算、不写长文）
-      ├── math_agent     算术，内部有计算器
-      ├── writer_agent   改写 / 总结 / 通俗解释
-      └── general_agent  闲聊、常识问答
+      ├── math_agent       算术，内部有计算器
+      ├── writer_agent     改写 / 总结 / 通俗解释
+      ├── knowledge_agent  查知识库（RAG：retrieve 工具）
+      └── general_agent    闲聊、常识问答
 
 主 Agent 的「工具」其实是子 Agent（见 DelegateTool）。
 子 Agent 各自再跑一轮自己的 ReAct 循环，把答案交回主 Agent。
@@ -22,6 +23,10 @@
   └─ 子 Agent → 「15 乘 23 等于 345。」
 主 Agent 第 3 轮：Final Answer: ...
 
+用户：年假有几天？
+主 Agent：Action[knowledge_agent](年假天数)
+  └─ 知识专家 Action[retrieve](年假) → 知识库段落 → Final Answer
+
 === 和 AgentScope 版的关系 ===
 这是 AGENT_BACKEND=handmade 时用的实现。
 同一张分工图的官方框架版见 scope_coordinator.py。
@@ -33,6 +38,7 @@ from src.agents.react_agent import ReactAgent
 from src.llm.base_client import BaseLLMClient
 from src.tools.calculator import CalculatorTool
 from src.tools.delegate import DelegateTool
+from src.tools.retrieve import RetrieveTool
 from src.utils.logger import get_logger
 
 logger = get_logger(__name__)
@@ -61,14 +67,22 @@ GENERAL_ROLE = (
     "用和用户相同的语言回复。"
 )
 
+KNOWLEDGE_ROLE = (
+    "你是知识专家 KnowledgeAgent，专门查知识库。"
+    "必须使用 retrieve 工具检索，不要凭记忆编造文档内容。"
+    "看到 Observation 之后，用 Final Answer 根据检索结果作答。"
+    "如果检索说没有相关内容，就如实告诉用户知识库里没有，不要编。"
+)
+
 COORD_ROLE = """你是主 Agent（CoordinatorAgent），负责给专家分活，不要自己做专家的工作。
 
 分工：
 - 算术、公式、数字计算 → math_agent
 - 改写、总结、翻译、通俗解释 → writer_agent
+- 问公司制度、项目说明、文档、知识库里的事实 → knowledge_agent
 - 闲聊、常识、其他问题 → general_agent
 
-可以连续调用多个子 Agent（例如先 math_agent 再 writer_agent）。
+可以连续调用多个子 Agent（例如先 knowledge_agent 再 writer_agent）。
 拿到足够的 Observation 之后，用 Final Answer 回答用户。
 除非用户问内部原理，否则不要提及工具名。"""
 
@@ -78,7 +92,7 @@ class CoordinatorAgent(ReactAgent):
     主 Agent：把用户任务分给子 Agent。
 
     继承 ReactAgent：外壳（组装 LLM / 工具 / 记忆）和循环都复用，
-    这里只负责「创建三个专家，再把他们包装成工具交给主管」。
+    这里只负责「创建四个专家，再把他们包装成工具交给主管」。
 
     HTTP / 命令行在 AGENT_BACKEND=handmade 时创建的就是这个类。
     """
@@ -92,6 +106,7 @@ class CoordinatorAgent(ReactAgent):
         math_llm: BaseLLMClient | None = None,
         writer_llm: BaseLLMClient | None = None,
         general_llm: BaseLLMClient | None = None,
+        knowledge_llm: BaseLLMClient | None = None,
         max_iterations: int = 10,
     ) -> None:
         """
@@ -99,7 +114,7 @@ class CoordinatorAgent(ReactAgent):
             name: 主 Agent 名字，出现在日志和 /chat 的 agent 字段。
             session_id: 会话 ID。只主 Agent 用来记对话；子 Agent 不记。
             llm_client: 主管自己的 LLM。测试时可注入假客户端。
-            math_llm / writer_llm / general_llm: 三个专家各自的 LLM。
+            math_llm / writer_llm / general_llm / knowledge_llm: 四个专家各自的 LLM。
                 不传则每个 ReactAgent 自己用 LLMFactory 建一个真实客户端。
             max_iterations: 主、子循环各自最多转几圈（保险丝）。
         """
@@ -129,15 +144,24 @@ class CoordinatorAgent(ReactAgent):
             role_prompt=GENERAL_ROLE,
             max_iterations=max_iterations,
         )
+        knowledge_agent = ReactAgent(
+            name="KnowledgeAgent",
+            llm_client=knowledge_llm,
+            tools=[RetrieveTool()],
+            use_memory=False,
+            role_prompt=KNOWLEDGE_ROLE,
+            max_iterations=max_iterations,
+        )
 
         # 给日志 /health 用：主 Agent 能调度谁
         self.sub_agents = {
             "math_agent": math_agent,
             "writer_agent": writer_agent,
             "general_agent": general_agent,
+            "knowledge_agent": knowledge_agent,
         }
 
-        # 主管自己：有记忆、工具是三个 DelegateTool
+        # 主管自己：有记忆、工具是 DelegateTool
         # DelegateTool 让 AgentLoop 以为自己在调普通工具，其实是在调子 Agent
         super().__init__(
             name=name,
@@ -152,6 +176,11 @@ class CoordinatorAgent(ReactAgent):
                     writer_agent,
                     "writer_agent",
                     "写作专家。改写、总结、或把内容讲成通俗的话。",
+                ),
+                DelegateTool(
+                    knowledge_agent,
+                    "knowledge_agent",
+                    "知识专家。查知识库：公司制度、项目说明、已灌入的文档。",
                 ),
                 DelegateTool(
                     general_agent,

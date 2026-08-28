@@ -114,3 +114,16 @@ answer = await agent.run("15 * 23 等于多少")
 ```
 
 实现见 `src/agents/scope_coordinator.py`。分工与手写 `CoordinatorAgent` 相同。
+
+### 灌入知识（RAG）
+
+```python
+from src.rag.ingest import ingest_text
+from src.rag.store import get_vector_store
+
+ingest_text("年假每年 10 天", source="leave.md")
+hits = get_vector_store().query("年假几天", top_k=3)
+```
+
+HTTP：`POST /knowledge`、`GET /knowledge/search?q=...`
+知识专家工具：`RetrieveTool`（`Action[retrieve](年假天数)`）。

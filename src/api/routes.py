@@ -26,8 +26,17 @@ from pydantic import ValidationError
 
 # 工厂：按 AGENT_BACKEND 给出手写 Coordinator 或 AgentScope 主 Agent
 from src.agents.factory import MainAgent, create_main_agent, display_agent_name, get_backend
-from src.api.models import ChatRequest, ChatResponse, HealthResponse
+from src.api.models import (
+    ChatRequest,
+    ChatResponse,
+    HealthResponse,
+    KnowledgeIngestRequest,
+    KnowledgeIngestResponse,
+    KnowledgeSearchResponse,
+)
 from src.database import init_db
+from src.rag.ingest import ingest_text
+from src.rag.store import get_vector_store
 from src.utils.exceptions import MaxIterationsError
 from src.utils.logger import get_logger
 
@@ -83,6 +92,8 @@ def index():
             "health": "GET /health",
             "chat": "POST /chat",
             "docs": "GET /docs",
+            "knowledge": "POST /knowledge",
+            "knowledge_search": "GET /knowledge/search",
         },
     })
 
@@ -91,12 +102,14 @@ def index():
 def health():
     """健康检查。"""
     db_ok = _ensure_db()
+    store = get_vector_store()
     body = HealthResponse(
         status="ok",
         agent=display_agent_name(),  # CoordinatorAgent 或 ScopeCoordinator
         database="connected" if db_ok else "unavailable",
-        sub_agents=["math_agent", "writer_agent", "general_agent"],
+        sub_agents=["math_agent", "writer_agent", "knowledge_agent", "general_agent"],
         backend=get_backend(),
+        knowledge_chunks=store.count(),
     )
     return jsonify(body.model_dump())
 
@@ -130,6 +143,16 @@ def docs():
                 "method": "POST",
                 "path": "/chat",
                 "description": "聊天。JSON body: {message: str, session_id?: str}",
+            },
+            {
+                "method": "POST",
+                "path": "/knowledge",
+                "description": "灌入知识。JSON body: {content: str, source?: str}",
+            },
+            {
+                "method": "GET",
+                "path": "/knowledge/search",
+                "description": "检索知识库。Query: q=关键词&top_k=3",
             },
             {
                 "method": "GET",
@@ -182,3 +205,53 @@ def chat():
     except Exception as e:
         logger.error("Chat failed: %s", e, exc_info=True)
         return jsonify({"detail": f"Internal error: {e}"}), 500
+
+
+@bp.post("/knowledge")
+def knowledge_ingest():
+    """
+    灌入知识。正文会被切块、向量化，写入全局知识库。
+    之后 knowledge_agent 用 retrieve 就能搜到。
+    """
+    payload = request.get_json(silent=True)
+    if not isinstance(payload, dict):
+        return jsonify({"detail": "Request body must be a JSON object"}), 422
+    try:
+        req = KnowledgeIngestRequest.model_validate(payload)
+    except ValidationError as e:
+        return jsonify({"detail": e.errors()}), 422
+
+    n = ingest_text(req.content, source=req.source or "api")
+    body = KnowledgeIngestResponse(
+        chunks=n,
+        source=req.source or "api",
+        total=get_vector_store().count(),
+    )
+    return jsonify(body.model_dump())
+
+
+@bp.get("/knowledge/search")
+def knowledge_search():
+    """调试用：不经过 Agent，直接看检索命中了哪几段。"""
+    query = (request.args.get("q") or "").strip()
+    if not query:
+        return jsonify({"detail": "query parameter q is required"}), 422
+    try:
+        top_k = int(request.args.get("top_k") or 3)
+    except ValueError:
+        return jsonify({"detail": "top_k must be an integer"}), 422
+
+    hits = get_vector_store().query(query, top_k=max(top_k, 1))
+    body = KnowledgeSearchResponse(
+        query=query,
+        hits=[
+            {
+                "id": h.id,
+                "source": h.source,
+                "score": round(h.score, 4),
+                "text": h.text,
+            }
+            for h in hits
+        ],
+    )
+    return jsonify(body.model_dump())

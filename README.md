@@ -26,6 +26,7 @@
 17. [常见问题](#17-常见问题)
 18. [对照表：名词 ↔ 代码文件](#18-对照表名词--代码文件)
 19. [AgentScope 2.0：同一套分工，换一套发动机](#19-agentscope-20同一套分工换一套发动机)
+20. [RAG：让 Agent 先翻笔记再回答](#20-rag让-agent-先翻笔记再回答)
 
 ---
 
@@ -34,7 +35,8 @@
 这是一个**教学用的多 Agent 框架**（一个主 Agent 调度多个子 Agent）。
 
 默认走**手写 ReAct**（自己解析 `Thought` / `Action` / `Final Answer`）。  
-同一套「主管 + 三个专家」也可以切到 **AgentScope 2.0**（官方框架，原生 tool calling），见第 19 节。
+同一套「主管 + 四个专家」也可以切到 **AgentScope 2.0**（官方框架，原生 tool calling），见第 19 节。
+文档类问题走 **RAG**（先检索知识库再生成），见第 20 节。
 
 普通聊天机器人：你问一句，模型直接回一句。
 
@@ -42,7 +44,8 @@
 
 1. 算术 → 交给 **math_agent**（它会用计算器）
 2. 改写 / 总结 / 通俗解释 → 交给 **writer_agent**
-3. 闲聊、常识 → 交给 **general_agent**
+3. 公司制度、项目说明、已灌入的文档 → 交给 **knowledge_agent**（它会检索知识库）
+4. 闲聊、常识 → 交给 **general_agent**
 
 每个 Agent 内部仍走 ReAct：**想一想 → 动手（工具或子 Agent）→ 看结果 → 最终答案**。
 
@@ -63,7 +66,8 @@
 | **Agent（智能体）** | 不只会说话，还会**自己决定调用工具**来完成任务的程序。 |
 | **ReAct** | Agent 的一种工作方式：Thought → Action → Observation，循环直到给出 Final Answer。 |
 | **Tool（工具）** | Agent 的「手」。计算器是一种工具；**子 Agent 也被包装成工具**给主 Agent 调用。 |
-| **主 Agent / 子 Agent** | 主 Agent（Coordinator）只负责分活；子 Agent 是数学、写作、通用三个专家。 |
+| **主 Agent / 子 Agent** | 主 Agent（Coordinator）只负责分活；子 Agent 是数学、写作、知识、通用四个专家。 |
+| **RAG** | Retrieval-Augmented Generation。先从知识库找出相关段落，再让模型根据这些段落回答，减少瞎编。 |
 | **AgentScope** | 阿里开源的 Agent 框架。本项目用 2.0 的 `Agent` + `Toolkit` 作为**可选后端**，和手写 ReAct 对照学习。 |
 | **AGENT_BACKEND** | `.env` 里的开关：`handmade`（默认）或 `agentscope`。 |
 | **Memory（记忆）** | 对话历史。没有记忆，Agent 下一句就忘了你刚才说了什么。 |
@@ -125,9 +129,10 @@ Action[calculator](15 * 23)
 你（客户）
    ↓
 主管 CoordinatorAgent（不自己算、不自己写长文，只分活）
-   ├── 数学专家 math_agent     → 只会算术，手里有计算器
-   ├── 写作专家 writer_agent   → 改写、总结、说人话
-   └── 通用专家 general_agent  → 闲聊、常识问答
+   ├── 数学专家 math_agent       → 只会算术，手里有计算器
+   ├── 写作专家 writer_agent     → 改写、总结、说人话
+   ├── 知识专家 knowledge_agent  → 翻笔记（RAG / retrieve 工具）
+   └── 通用专家 general_agent    → 闲聊、常识问答
 ```
 
 主管眼里，子 Agent 和计算器是同一类东西：都是 `Action[名字](任务)`。  
@@ -151,6 +156,7 @@ Action[calculator](15 * 23)
 | 7 | `src/agents/react_agent.py` | Agent 外壳：组装 LLM、工具、记忆 |
 | 8 | `src/core/agent_loop.py` | **最重要**：ReAct 循环到底怎么转 |
 | 9 | `src/tools/calculator.py` | 一个真正的工具长什么样 |
+| 9b | `src/rag/store.py` + `src/tools/retrieve.py` | RAG：向量检索 + 知识专家的手 |
 | 10 | `src/llm/openai_client.py` | 怎么把消息发给 DeepSeek |
 | 11 | `src/memory/manager.py` | 记忆怎么存、怎么读 |
 | 12 | `src/api/routes.py` | `/chat` 接口怎么接到主 Agent |
@@ -174,8 +180,9 @@ agent_study_flask/
 │   │                       + factory.py 按 AGENT_BACKEND 切换
 │   ├── core/               大脑引擎：AgentLoop（perceive → decide → act）
 │   ├── llm/                怎么调用大模型
-│   ├── tools/              计算器 + 委派工具（把子 Agent 当工具）
-│   ├── memory/             短期记忆 + 长期记忆（长期还是空壳）
+│   ├── tools/              计算器 + 检索 + 委派工具（把子 Agent 当工具）
+│   ├── rag/                RAG：切块、向量化、知识库
+│   ├── memory/             短期记忆 + 长期记忆（长期已接到 RAG）
 │   ├── database/           PostgreSQL：把对话存进数据库
 │   ├── api/                Flask 的路由和请求/响应格式
 │   ├── configs/            从 .env 读配置
@@ -183,6 +190,9 @@ agent_study_flask/
 │   ├── cache/              LLM 响应缓存（代码有了，主流程还没接上）
 │   ├── prompts/            提示词草稿（目前循环里是代码里写死的 prompt）
 │   └── utils/              日志、自定义异常
+│
+├── data/
+│   └── knowledge/          示例文档（空库时自动灌入）
 │
 ├── tests/                  自动化测试
 │   ├── unit/               测单个模块（用假 LLM，不花 API 钱）
@@ -343,8 +353,10 @@ python server.py
 | `AGENT_MEMORY_WINDOW` | 短期记忆最多留几条消息 | `20` |
 | `AGENT_DEBUG` | 是否打更详细日志 | `true` |
 | `AGENT_BACKEND` | 主 Agent 实现：`handmade` 或 `agentscope` | `handmade` |
+| `RAG_TOP_K` | 检索时返回几段 | `3` |
+| `RAG_PERSIST_PATH` | 向量索引 JSON 存放目录 | `./data/rag` |
+| `RAG_KNOWLEDGE_DIR` | 启动时空库时自动灌入的文档目录 | `./data/knowledge` |
 | `PG_URI` | PostgreSQL 连接串 | `postgresql://用户:密码@主机:5432/库名` |
-| `CHROMA_PERSIST_PATH` | 向量库路径（长期记忆预留） | `./data/chroma` |
 
 DeepSeek 的接口和 OpenAI 的 Chat Completions 格式兼容，所以代码类名叫 `OpenAIClient`，实际可以连 DeepSeek。换别的兼容服务时，通常只改 `LLM_BASE_URL`、`LLM_API_KEY`、`LLM_MODEL`。
 
@@ -365,11 +377,28 @@ DeepSeek 的接口和 OpenAI 的 Chat Completions 格式兼容，所以代码类
   "status": "ok",
   "agent": "CoordinatorAgent",
   "database": "connected",
-  "sub_agents": ["math_agent", "writer_agent", "general_agent"]
+  "backend": "handmade",
+  "sub_agents": ["math_agent", "writer_agent", "knowledge_agent", "general_agent"],
+  "knowledge_chunks": 4
 }
 ```
 
-`database` 可能是 `connected` 或 `unavailable`。
+`database` 可能是 `connected` 或 `unavailable`。`knowledge_chunks` 是向量库里有多少段文字。
+
+### `POST /knowledge`
+
+把一段文字灌进知识库（会自动切块）。之后问相关问题，`knowledge_agent` 就能检索到。
+
+```json
+{
+  "content": "茶水间的Wi-Fi密码是 study-rag。",
+  "source": "office-note"
+}
+```
+
+### `GET /knowledge/search?q=年假几天`
+
+不经过 Agent，直接看检索命中了哪几段。适合调试「为什么答错了」。
 
 ### `POST /chat`
 
@@ -426,13 +455,13 @@ Invoke-RestMethod -Method POST -Uri http://localhost:8000/chat `
 
 ## 10. 记忆系统：Agent 怎么记住你说过的话
 
-分三层，目前真正在用的是前两层：
+分三层：
 
 ```text
 MemoryManager
  ├── ShortTermMemory     内存里的滑动窗口（deque），默认最近 20 条
  ├── PostgreSQL          持久化，重启后按 session_id 把历史装回内存
- └── LongTermMemory      预留：以后用向量库做「语义搜索旧知识」，现在是空壳
+ └── LongTermMemory      RAG 向量库：按「意思相近」搜知识文档
 ```
 
 **为什么既要内存又要数据库？**
@@ -457,7 +486,7 @@ LLM 一次能吃的文字有上限。窗口 = 只保留最近 N 条。
 
 - `src/memory/manager.py` — 调度中心
 - `src/memory/short_term.py` — 内存窗口
-- `src/memory/long_term.py` — stub（占位，还没接 ChromaDB）
+- `src/memory/long_term.py` — 接到 `src/rag/` 的向量库
 - `src/database/connection.py` — 连接池、建表
 - `src/database/chat_history.py` — 增删查对话记录
 
@@ -564,7 +593,6 @@ HTTP 层会把 `MaxIterationsError` 变成 508，其它未捕获异常变成 500
 | `src/safety/output_filter.py` | 能把邮箱、手机号、身份证、`sk-` 密钥打成 `[EMAIL]` 等，**主流程没接** |
 | `src/cache/response_cache.py` | 相同 messages 可缓存 LLM 回复，**OpenAIClient 没接** |
 | `src/prompts/*.md` | 写了更完整的 ReAct 提示词和 few-shot 例子，**实际 prompt 是 `agent_loop.py` 里字符串拼出来的** |
-| `src/memory/long_term.py` | 向量长期记忆接口，返回空列表 / `"stub-id"` |
 
 它们不是垃圾，而是**预留扩展点**。想动手练习，最合适的作业就是：把 InputFilter、OutputFilter、ResponseCache 接到 `AgentLoop` 或 `routes` 上。
 
@@ -623,7 +651,9 @@ pytest
 - `tests/unit/test_multi_agent.py` — 主 Agent 委派给数学子 Agent
 - `tests/unit/test_agentscope.py` — AgentScope 工具包装 / 工厂切换（不调真实 LLM）
 - `tests/integration/test_agent_e2e.py` — Loop + 真计算器 + 假 LLM
-- `tests/integration/test_api.py` — HTTP `/`、`/health`、`/chat`
+- `tests/unit/test_rag.py` — 向量化 / 切块 / 检索
+- `tests/unit/test_rag_agent.py` — 主 Agent 委派 knowledge_agent + retrieve
+- `tests/integration/test_api.py` — HTTP `/`、`/health`、`/chat`、`/knowledge`
 
 ---
 
@@ -656,6 +686,9 @@ A：HTTP 协议按 OpenAI Chat Completions 来写；默认配置指向 DeepSeek�
 **Q：handmade 和 agentscope 我该用哪个？**  
 A：先用 `handmade` 看懂 ReAct 循环（`agent_loop.py`）。想对照官方框架时，把 `.env` 里 `AGENT_BACKEND` 改成 `agentscope` 即可，Flask / 命令行入口不用改。
 
+**Q：问「年假有几天」却瞎编？**  
+A：知识必须先在库里。确认 `data/knowledge/` 有文档，或用 `POST /knowledge` 灌入。再用 `GET /knowledge/search?q=年假` 看检索是否命中。教学用的向量是 n-gram 哈希，关键词要对得上；不是工业级语义模型。
+
 ---
 
 ## 18. 对照表：名词 ↔ 代码文件
@@ -669,6 +702,8 @@ A：先用 `handmade` 看懂 ReAct 循环（`agent_loop.py`）。想对照官方
 | 主 Agent（手写） | `src/agents/coordinator_agent.py` |
 | 主 Agent（AgentScope 2.0） | `src/agents/scope_coordinator.py` |
 | 两套后端怎么切换 | `src/agents/factory.py` |
+| 知识专家 / RAG | `src/agents/coordinator_agent.py` + `src/rag/` + `src/tools/retrieve.py` |
+| 灌入 / 检索 HTTP | `POST /knowledge`、`GET /knowledge/search` |
 | Agent 外壳（专家也用它） | `src/agents/react_agent.py` |
 | 把子 Agent 当工具 | `src/tools/delegate.py` |
 | Agent 必须实现 run() | `src/agents/base_agent.py` |
@@ -708,7 +743,7 @@ A：先用 `handmade` 看懂 ReAct 循环（`agent_loop.py`）。想对照官方
 ## 19. AgentScope 2.0：同一套分工，换一套发动机
 
 手写版让你看清 ReAct **每一行代码**在干什么。  
-AgentScope 版让你看到：**同样的主管 + 三个专家，换成官方框架之后长什么样。**
+AgentScope 版让你看到：**同样的主管 + 四个专家，换成官方框架之后长什么样。**
 
 | | 手写 `handmade` | AgentScope `agentscope` |
 |---|---|---|
@@ -731,4 +766,37 @@ AGENT_BACKEND=handmade
 ```
 
 注意：AgentScope 的普通 `FunctionTool` 默认权限是 **ASK**（每次用工具要人确认）。学习项目在 Flask 里没法弹窗，所以包装类 `AllowFunctionTool` 改成自动 **ALLOW**。这只适合计算器这种安全工具，不要照搬到会改文件、跑系统命令的工具上。
+
+---
+
+## 20. RAG：让 Agent 先翻笔记再回答
+
+普通聊天模型只靠训练时见过的世界。你公司的请假制度它没见过，就容易瞎编。
+
+**RAG** = 先检索，再生成：
+
+```
+你：年假有几天？
+        ↓
+主管 → knowledge_agent
+        ↓
+Action[retrieve](年假天数)
+        ↓
+向量库：找出和「年假」最像的几段（来自 data/knowledge/leave-policy.md）
+        ↓
+Observation 里带着「每年 10 个工作日」
+        ↓
+Final Answer：根据知识库，年假是 10 天。
+```
+
+本项目为了教学、不下载大 embedding 模型，用的是「字符 n-gram 哈希」向量（`src/rag/embeddings.py`）。关键词重合就能命中；「狗」和「犬」这种同义不一定近。以后要换工业级模型，只改这一个文件。
+
+### 怎么放知识
+
+1. 把 `.md` / `.txt` 放进 `data/knowledge/`（首次空库时自动灌入）
+2. 或 `POST /knowledge` 随时追加
+3. 用 `GET /knowledge/search?q=...` 检查有没有搜到
+
+试：`python main.py "年假有几天"`
+
 

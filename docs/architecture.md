@@ -2,14 +2,15 @@
 
 ## 概览
 
-多 Agent + ReAct：
+多 Agent + ReAct + RAG：
 
 ```
 User
   → CoordinatorAgent（主：分活）
-       ├── math_agent     → CalculatorTool
-       ├── writer_agent   → 无工具，只生成文字
-       └── general_agent  → 无工具，只生成文字
+       ├── math_agent        → CalculatorTool
+       ├── writer_agent      → 无工具，只生成文字
+       ├── knowledge_agent   → RetrieveTool（向量知识库）
+       └── general_agent     → 无工具，只生成文字
 ```
 
 每个 Agent 内部仍是：
@@ -31,20 +32,19 @@ main.py / server.py
   └── agents/factory.py                 ← AGENT_BACKEND 开关
         ├── coordinator_agent.py        ← handmade：手写 ReAct
         │     ├── tools/delegate.py
-        │     ├── agents/react_agent.py
+        │     ├── tools/retrieve.py     ← RAG
+        │     ├── rag/store.py
         │     └── core/agent_loop.py
         └── scope_coordinator.py        ← agentscope：官方 Agent
-              ├── scope_tools.py        ← CalculatorTool + 子 Agent 适配
-              └── agentscope.agent.Agent
 ```
 
-## 认知循环流程
+## RAG 流程
 
-1. **Perceive**: 构建 system prompt +（主 Agent）加载历史记忆 + 用户输入
-2. **Decide**: LLM 输出 `Thought + Action[tool](args)` 或 `Final Answer`
-3. **Act**: 解析 Action；若是 `math_agent` 则进入子 Agent 的循环
-4. **Observe**: 将工具或子 Agent 返回结果回传给当前 Agent 的 LLM
-5. **Loop**: 重复直到 Final Answer 或 max_iterations
+1. 切块：`chunker.py` 把长文档切成小段
+2. 向量化：`embeddings.py` 把每段变成 64 维单位向量
+3. 存储：`store.py` 写入内存，并持久化 `data/rag/index.json`
+4. 检索：用户问题同样向量化，按余弦相似度取 top_k
+5. 生成：knowledge_agent 把命中段落当 Observation，再写 Final Answer
 
 ## 设计原则
 
@@ -52,3 +52,4 @@ main.py / server.py
 - **记忆隔离**: 只有 Coordinator 持有 session 记忆；专家 `use_memory=False`
 - **依赖注入**: Agent 接收 LLM/Tools/Memory，测试可注入假 LLM
 - **工厂模式**: `create_main_agent()` 按 `AGENT_BACKEND` 选择手写或 AgentScope
+- **知识与对话分离**: 对话窗口是短期记忆；制度/文档走向量库
