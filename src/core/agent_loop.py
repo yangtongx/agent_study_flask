@@ -42,6 +42,9 @@ from src.tools.base_tool import BaseTool
 # MaxIterationsError: 超过最大迭代次数时抛出
 from src.utils.exceptions import MaxIterationsError
 
+# 导入提示词模板（人设、few-shot、任务包装、格式纠错都在 src/prompts/*.md）
+from src.prompts.loader import build_chat_messages, load_prompt
+
 # 导入日志
 from src.utils.logger import get_logger
 
@@ -104,22 +107,17 @@ class AgentLoop:
             MaxIterationsError: 超过最大迭代次数。
         """
         # ===== 第 1 步：感知（Perceive）=====
-        # 构建 system prompt（告诉 LLM 它是什么角色、有哪些工具可用）
-        system_prompt = self._build_system_prompt()
-
-        # 从记忆中加载之前的对话历史
-        # 这样 Agent 能"记住"之前聊过什么
-        history = self._load_history()
-
-        # 组装完整的消息列表（发给 LLM 的消息格式）
-        # *history 是 Python 的解包语法：把列表展开成一个个独立元素
-        # 例如 history = [{"role":"user",...}, {"role":"assistant",...}]
-        # 展开后等同于直接写这两个 dict
-        messages = [
-            {"role": "system", "content": system_prompt},  # 系统提示
-            *history,                                      # 历史对话
-            {"role": "user", "content": user_input},       # 当前用户输入
-        ]
+        # 构建带 role 的消息列表：
+        # system（system.md + examples.md）+ 历史 + 当前用户输入（task.md）
+        # 由 ChatPromptTemplate.from_messages 组装，再转成 OpenAI dict
+        tool_desc = "\n".join(
+            f"  - {t.name}: {t.description}" for t in self.tools
+        )
+        messages = build_chat_messages(
+            tool_descriptions=tool_desc,
+            history=self._load_history(),
+            user_input=user_input,
+        )
 
         # ===== 第 2 步：循环（Decide → Act → Observe）=====
         # range(1, self.max_iterations + 1) 生成 1, 2, 3, ..., max_iterations
@@ -149,10 +147,21 @@ class AgentLoop:
             # 尝试从 LLM 输出中解析出 Action[tool_name](args)
             action = self._parse_action(response)
             if action is None:
-                # LLM 没有按格式输出，提醒它用正确格式
+                # 没有 Action。可能是：
+                # 1) 模型直接用自然语言答了（常见于「你叫什么」这类闲聊）
+                # 2) 只写了 Thought，ReAct 格式不完整
+                #
+                # 以前这里只注入 "Please use the format: Action[tool_name](args)"，
+                # 模型会把这条 user 消息当成新问题，开始解释格式，丢掉原问题。
+                if self._is_plain_reply(response):
+                    answer = response.strip()
+                    self._save_history(user_input, answer)
+                    logger.info("Plain reply accepted as final answer at iteration %d", i)
+                    return answer
+
                 messages.append({
                     "role": "user",
-                    "content": "Please use the format: Action[tool_name](args)",
+                    "content": load_prompt("retry.md"),
                 })
                 continue  # 跳过本轮，进入下一轮循环
 
@@ -191,17 +200,9 @@ class AgentLoop:
         tool_desc = "\n".join(
             f"  - {t.name}: {t.description}" for t in self.tools
         )
-        return (
-            "You are a helpful AI Agent using the ReAct pattern.\n"
-            "Available tools:\n"
-            f"{tool_desc}\n\n"
-            "Use this format:\n"
-            "Thought: <your reasoning>\n"
-            "Action[<tool_name>](<args>)\n"
-            "OR\n"
-            "Thought: <your reasoning>\n"
-            "Final Answer: <your answer>\n"
-        )
+        # 人设和 few-shot 都在 markdown 模板里，由 ChatPromptTemplate 渲染
+        messages = build_chat_messages(tool_desc, history=[], user_input="")
+        return messages[0]["content"]
 
     def _load_history(self) -> list[dict]:
         """
@@ -259,6 +260,21 @@ class AgentLoop:
         # .strip() 去除首尾空白
         # 如果没匹配（match is None），返回 None
         return match.group(1).strip() if match else None
+
+    @staticmethod
+    def _is_plain_reply(response: str) -> bool:
+        """
+        判断 LLM 是否在用自然语言直接回答（没有走 ReAct 标记）。
+
+        「你叫什么」这类问题，模型经常不写 Thought/Action/Final Answer，
+        直接回「我是 xxx」。这种回复应当原样返回，而不是逼它改成 Action。
+        """
+        text = response.strip()
+        if not text:
+            return False
+        if re.search(r"(?i)^\s*Thought\s*:", text) or "Action[" in text:
+            return False
+        return True
 
     @staticmethod
     def _parse_action(response: str) -> tuple[str, str] | None:

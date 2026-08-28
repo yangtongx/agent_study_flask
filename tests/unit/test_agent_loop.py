@@ -35,9 +35,13 @@ class FakeLLMClient:
         """
         self._responses = responses
         self._idx = 0  # 当前回复的索引
+        self.calls: list[list[dict]] = []  # 每次 chat() 收到的 messages
 
     async def chat(self, messages: list[dict], **kwargs) -> str:
         """模拟 LLM 的 chat 方法，返回预设回复。"""
+        # 记下每次调用时的完整消息，方便断言循环注入了什么
+        self.calls.append([dict(m) for m in messages])
+
         # 如果预设回复用完了，返回默认回复
         if self._idx >= len(self._responses):
             return "Final Answer: I don't know."
@@ -87,3 +91,71 @@ async def test_max_iterations_error():
     # pytest.raises 断言会抛出指定异常
     with pytest.raises(MaxIterationsError):
         await loop.execute("loop forever")
+
+
+@pytest.mark.asyncio
+async def test_plain_reply_treated_as_final_answer():
+    """
+    测试场景3：用户问「你叫什么」，LLM 直接用自然语言回答，没有 ReAct 标记。
+
+    预期行为：把它当成最终答案返回，不要注入「请用 Action 格式」
+    把对话劫持成格式说明。
+    """
+    client = FakeLLMClient(["我是 ReactAgent，一个基于 ReAct 的助手。"])
+    loop = AgentLoop(llm_client=client, tools=[], max_iterations=3)
+
+    result = await loop.execute("你叫什么")
+
+    assert "ReactAgent" in result
+    assert "Action[" not in result
+    assert loop._iteration_count == 1
+
+
+@pytest.mark.asyncio
+async def test_incomplete_thought_retry_allows_final_answer():
+    """
+    测试场景4：第一轮只有 Thought、没有 Action/Final Answer。
+
+    预期行为：重试提示必须同时允许 Final Answer，不能只逼模型输出 Action。
+    否则模型会把提示当成新问题，开始解释格式。
+    """
+    client = FakeLLMClient([
+        "Thought: The user asked my name.",
+        "Thought: I can answer directly.\nFinal Answer: 我叫 ReactAgent",
+    ])
+    loop = AgentLoop(llm_client=client, tools=[], max_iterations=3)
+
+    result = await loop.execute("你叫什么")
+
+    assert "ReactAgent" in result
+    assert len(client.calls) == 2
+    hint = client.calls[1][-1]["content"]
+    assert "Final Answer" in hint
+
+
+def test_system_prompt_covers_identity_and_direct_answer():
+    """
+    测试场景5：system prompt 要告诉模型自己叫 ReactAgent，
+    简单问题（名字、闲聊）应直接 Final Answer，不要解释工具格式。
+    """
+    loop = AgentLoop(llm_client=FakeLLMClient([]), tools=[], max_iterations=1)
+    prompt = loop._build_system_prompt()
+
+    assert "你是 ReactAgent" in prompt
+    assert "你的名字是 ReactAgent" in prompt
+    assert "Final Answer" in prompt
+    assert "Action[" in prompt
+    assert "可用工具" in prompt
+
+
+@pytest.mark.asyncio
+async def test_execute_wraps_user_input_with_task_template():
+    """发给 LLM 的当前用户消息应来自 task.md，而不是裸输入。"""
+    client = FakeLLMClient(["Thought: ok\nFinal Answer: 我叫 ReactAgent"])
+    loop = AgentLoop(llm_client=client, tools=[], max_iterations=2)
+
+    await loop.execute("你叫什么")
+
+    user_msg = client.calls[0][-1]["content"]
+    assert "你叫什么" in user_msg
+    assert "用户输入" in user_msg

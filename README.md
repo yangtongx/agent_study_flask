@@ -173,7 +173,7 @@ agent_study_flask/
 │   ├── configs/            从 .env 读配置
 │   ├── safety/             输入过滤、输出脱敏（代码有了，主流程还没接上）
 │   ├── cache/              LLM 响应缓存（代码有了，主流程还没接上）
-│   ├── prompts/            提示词草稿（目前循环里是代码里写死的 prompt）
+│   ├── prompts/            提示词模板：system.md / examples.md / task.md / retry.md
 │   └── utils/              日志、自定义异常
 │
 ├── tests/                  自动化测试
@@ -553,7 +553,6 @@ HTTP 层会把 `MaxIterationsError` 变成 508，其它未捕获异常变成 500
 | `src/safety/input_filter.py` | 能检测常见 Prompt Injection（如 “ignore previous instructions”），**`AgentLoop` / `routes` 没有调用它** |
 | `src/safety/output_filter.py` | 能把邮箱、手机号、身份证、`sk-` 密钥打成 `[EMAIL]` 等，**主流程没接** |
 | `src/cache/response_cache.py` | 相同 messages 可缓存 LLM 回复，**OpenAIClient 没接** |
-| `src/prompts/*.md` | 写了更完整的 ReAct 提示词和 few-shot 例子，**实际 prompt 是 `agent_loop.py` 里字符串拼出来的** |
 | `src/memory/long_term.py` | 向量长期记忆接口，返回空列表 / `"stub-id"` |
 
 它们不是垃圾，而是**预留扩展点**。想动手练习，最合适的作业就是：把 InputFilter、OutputFilter、ResponseCache 接到 `AgentLoop` 或 `routes` 上。
@@ -581,8 +580,21 @@ HTTP 层会把 `MaxIterationsError` 变成 508，其它未捕获异常变成 500
 
 ### 换提示词
 
-现在改 `AgentLoop._build_system_prompt()`。  
-以后也可以改成读取 `src/prompts/system.md`。
+改 `src/prompts/` 下的 markdown，不必改循环代码。
+
+消息列表用 LangChain 的 `ChatPromptTemplate.from_messages` 拼出来：
+
+`system`（人设 + 工具 + few-shot）→ `history` 占位 → `human`（当前输入）
+
+再转成 OpenAI 的 `[{"role", "content"}]`，交给现有的 httpx 客户端。  
+**只用它组装 messages，不用 LangChain Agent**；Thought / Action / Observation 循环仍是手写的。
+
+| 文件 | 作用 |
+|---|---|
+| `system.md` | 人设、工具列表占位符 `{tool_descriptions}`、输出格式 |
+| `examples.md` | few-shot 示例，会拼进 system 消息 |
+| `task.md` | 包装当前这一轮用户输入 |
+| `retry.md` | 模型没按 ReAct 格式输出时的纠错提示 |
 
 ---
 
@@ -601,6 +613,7 @@ pytest
 
 主要文件：
 
+- `tests/unit/test_prompts.py` — ChatPromptTemplate 组装消息
 - `tests/unit/test_agent_loop.py` — 立刻给答案 / 超时抛错
 - `tests/unit/test_tools.py` — 计算器
 - `tests/unit/test_memory.py` — 短期记忆窗口

@@ -42,6 +42,11 @@ if __name__ == "__main__":
     # Flask 内置开发服务器
     # host="0.0.0.0" → 监听所有网卡（允许局域网访问）
     # port=8000      → 浏览器访问 http://localhost:8000
-    # debug=True     → 代码改动后自动重启；出错时显示调试页（只适合学习/开发）
+    # debug=True     → 出错时显示调试页（只适合学习/开发）
+    #
+    # use_reloader=False：不要再拉子进程。
+    # debug=True 默认会 Restarting with stat，变成「父进程 + 子进程」两个 Python。
+    # Windows 上还可能两份 server.py 同时占 8000，请求打到僵死的那份，
+    # 就会出现 All connection attempts failed；IDE 断点也会打不进去。
     logger.info("Agent API server starting on http://0.0.0.0:8000 ...")
-    app.run(host="0.0.0.0", port=8000, debug=True)
+    app.run(host="0.0.0.0", port=8000, debug=True, use_reloader=False)
