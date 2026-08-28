@@ -1,6 +1,6 @@
 # Architecture
 
-给已经走过 README 的人看的草图。逐步说明仍以根目录 `README.md` 第 5、6 节为准。
+给已经走过 README 的人看的草图。逐步说明仍以根目录 `README.md` 第 4、5、6 节为准：先手写 ReAct 和 RAG，AgentScope 放最后选修。
 
 ## 概览
 

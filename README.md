@@ -25,8 +25,8 @@
 16. [怎么跑测试](#16-怎么跑测试)
 17. [常见问题](#17-常见问题)
 18. [对照表：名词 ↔ 代码文件](#18-对照表名词--代码文件)
-19. [AgentScope 2.0：同一套分工，换一套发动机](#19-agentscope-20同一套分工换一套发动机)
-20. [RAG：让 Agent 先翻笔记再回答](#20-rag让-agent-先翻笔记再回答)
+19. [RAG：让 Agent 先翻笔记再回答](#19-rag让-agent-先翻笔记再回答)
+20. [AgentScope 2.0：同一套分工，换一套发动机](#20-agentscope-20同一套分工换一套发动机)
 
 ---
 
@@ -35,8 +35,8 @@
 这是一个**教学用的多 Agent 框架**（一个主 Agent 调度多个子 Agent）。
 
 默认走**手写 ReAct**（自己解析 `Thought` / `Action` / `Final Answer`）。  
-同一套「主管 + 四个专家」也可以切到 **AgentScope 2.0**（官方框架，原生 tool calling），见第 19 节。
-文档类问题走 **RAG**（先检索知识库再生成），见第 20 节。
+文档类问题走 **RAG**（先检索知识库再生成），见第 19 节。  
+同一套分工也可以切到 **AgentScope 2.0**（选修，对照官方框架），见第 20 节。建议先把 RAG 看懂再切。
 
 普通聊天机器人：你问一句，模型直接回一句。
 
@@ -142,6 +142,18 @@ Action[calculator](15 * 23)
 
 ## 4. 建议阅读顺序
 
+git 分支的创建顺序是：`main` → 多 Agent → AgentScope → RAG。  
+**学习不要按这个顺序。** AgentScope 是换发动机，比「再加一把检索工具」跳得大。按下面这条梯子走更顺：
+
+| 阶 | 你要搞懂的 | 对应（分支 / 代码） |
+|---|---|---|
+| 1 | 一个 Agent、一个计算器、ReAct 怎么转 | `main` 的思路；`agent_loop.py` |
+| 2 | 主管分活；子 Agent 也是工具 | `feature/multi-agent`；`coordinator_agent.py`、`delegate.py` |
+| 3 | 再多一只手：翻知识库 | `retrieve.py`、`src/rag/`（第 19 节） |
+| 4 | （选修）同一套分工，换官方框架 | `AGENT_BACKEND=agentscope`（第 20 节） |
+
+默认一直留在 `handmade`。checkout `feature/rag` 会一次拿到全部代码，所以用**读文件的顺序**分层，不必每个历史分支都跑一遍。
+
 别一上来把 `src/` 全部打开。按这个顺序读，每读一个文件就能多懂一层：
 
 | 顺序 | 文件 | 你将搞懂 |
@@ -149,17 +161,16 @@ Action[calculator](15 * 23)
 | 1 | 本 README | 全貌 |
 | 2 | `main.py` | 命令行怎么启动一轮对话 |
 | 3 | `server.py` | HTTP 服务怎么起来 |
-| 4 | `src/agents/coordinator_agent.py` | **多 Agent 入口（手写版）**：主 Agent 怎么分活 |
-| 4b | `src/agents/scope_coordinator.py` | **同一套分工的 AgentScope 2.0 版**（可选） |
-| 5 | `src/agents/factory.py` | `AGENT_BACKEND` 怎么在两套实现之间切换 |
-| 6 | `src/tools/delegate.py` | 子 Agent 如何被包装成工具 |
-| 7 | `src/agents/react_agent.py` | Agent 外壳：组装 LLM、工具、记忆 |
-| 8 | `src/core/agent_loop.py` | **最重要**：ReAct 循环到底怎么转 |
-| 9 | `src/tools/calculator.py` | 一个真正的工具长什么样 |
-| 9b | `src/rag/store.py` + `src/tools/retrieve.py` | RAG：向量检索 + 知识专家的手 |
+| 4 | `src/core/agent_loop.py` | **最重要**：ReAct 循环到底怎么转 |
+| 5 | `src/tools/calculator.py` | 一个真正的工具长什么样 |
+| 6 | `src/agents/react_agent.py` | Agent 外壳：组装 LLM、工具、记忆 |
+| 7 | `src/tools/delegate.py` | 子 Agent 如何被包装成工具 |
+| 8 | `src/agents/coordinator_agent.py` | 主 Agent 怎么分活 |
+| 9 | `src/tools/retrieve.py` + `src/rag/` | RAG：和计算器同一套接口，只是换成翻笔记 |
 | 10 | `src/llm/openai_client.py` | 怎么把消息发给 DeepSeek |
 | 11 | `src/memory/manager.py` | 记忆怎么存、怎么读 |
-| 12 | `src/api/routes.py` | `/chat` 接口怎么接到主 Agent |
+| 12 | `src/api/routes.py` | `/chat`、`/knowledge` 怎么接到主流程 |
+| 13 | `src/agents/factory.py` + `scope_coordinator.py` | **选修**：两套后端怎么切换 |
 
 源码里大部分文件顶部都有「这个文件做什么」的中文注释，就是给初学者写的，可以对着看。
 
@@ -691,7 +702,7 @@ A：不会。只有主 Agent 开了会话记忆。子 Agent `use_memory=False`�
 A：HTTP 协议按 OpenAI Chat Completions 来写；默认配置指向 DeepSeek。换兼容该协议的其它厂商，改 `.env` 即可。
 
 **Q：handmade 和 agentscope 我该用哪个？**  
-A：先用 `handmade` 看懂 ReAct 循环（`agent_loop.py`）。想对照官方框架时，把 `.env` 里 `AGENT_BACKEND` 改成 `agentscope` 即可，Flask / 命令行入口不用改。
+A：先用 `handmade` 把 ReAct 循环和 `retrieve` 看懂。AgentScope 是选修：同一套四个专家，换成官方 tool calling。学完第 19 节再把 `AGENT_BACKEND` 改成 `agentscope`。
 
 **Q：问「年假有几天」却瞎编？**  
 A：知识必须先在库里。确认 `data/knowledge/` 有文档，或用 `POST /knowledge` 灌入。再用 `GET /knowledge/search?q=年假` 看检索是否命中。教学用的向量是 n-gram 哈希，关键词要对得上；不是工业级语义模型。
@@ -748,7 +759,45 @@ A：知识必须先在库里。确认 `data/knowledge/` 有文档，或用 `POST
 
 ---
 
-## 19. AgentScope 2.0：同一套分工，换一套发动机
+## 19. RAG：让 Agent 先翻笔记再回答
+
+普通聊天模型只靠训练时见过的世界。你公司的请假制度它没见过，就容易瞎编。
+
+**RAG** = 先检索，再生成：
+
+```
+你：年假有几天？
+        ↓
+主管 → knowledge_agent
+        ↓
+Action[retrieve](年假天数)
+        ↓
+向量库：找出和「年假」最像的几段（来自 data/knowledge/leave-policy.md）
+        ↓
+Observation 里带着「每年 10 个工作日」
+        ↓
+Final Answer：根据知识库，年假是 10 天。
+```
+
+和计算器是同一类跳：模型决定调用工具，Python 真正执行。只是这只手从「算数」换成「翻笔记」。
+
+本项目为了教学、不下载大 embedding 模型，用的是「字符 n-gram 哈希」向量（`src/rag/embeddings.py`）。关键词重合就能命中；「狗」和「犬」这种同义不一定近。以后要换工业级模型，只改这一个文件。
+
+### 怎么放知识
+
+1. 把 `.md` / `.txt` 放进 `data/knowledge/`（**仅当索引还是空的**时自动灌入）
+2. 或 `POST /knowledge` 随时追加（同一 `source` 会覆盖旧片段）
+3. 用 `GET /knowledge/search?q=...` 检查有没有搜到
+
+已经生成过 `data/rag/index.json` 之后，只改 `data/knowledge/` 里的文件**不会**自动更新。要看到新内容：删掉 `data/rag/` 再启动，或走 `POST /knowledge`。
+
+试：`python main.py "年假有几天"`
+
+---
+
+## 20. AgentScope 2.0：同一套分工，换一套发动机
+
+**先读完第 19 节。** 这里不是再加一个专家，而是把「自己解析 Thought/Action 文本」换成官方框架的 function calling。四个专家（含 knowledge_agent）还在。
 
 手写版让你看清 ReAct **每一行代码**在干什么。  
 AgentScope 版让你看到：**同样的主管 + 四个专家，换成官方框架之后长什么样。**
@@ -775,39 +824,5 @@ AGENT_BACKEND=handmade
 ```
 
 注意：AgentScope 的普通 `FunctionTool` 默认权限是 **ASK**（每次用工具要人确认）。学习项目在 Flask 里没法弹窗，所以包装类 `AllowFunctionTool` 改成自动 **ALLOW**。这只适合计算器这种安全工具，不要照搬到会改文件、跑系统命令的工具上。
-
----
-
-## 20. RAG：让 Agent 先翻笔记再回答
-
-普通聊天模型只靠训练时见过的世界。你公司的请假制度它没见过，就容易瞎编。
-
-**RAG** = 先检索，再生成：
-
-```
-你：年假有几天？
-        ↓
-主管 → knowledge_agent
-        ↓
-Action[retrieve](年假天数)
-        ↓
-向量库：找出和「年假」最像的几段（来自 data/knowledge/leave-policy.md）
-        ↓
-Observation 里带着「每年 10 个工作日」
-        ↓
-Final Answer：根据知识库，年假是 10 天。
-```
-
-本项目为了教学、不下载大 embedding 模型，用的是「字符 n-gram 哈希」向量（`src/rag/embeddings.py`）。关键词重合就能命中；「狗」和「犬」这种同义不一定近。以后要换工业级模型，只改这一个文件。
-
-### 怎么放知识
-
-1. 把 `.md` / `.txt` 放进 `data/knowledge/`（**仅当索引还是空的**时自动灌入）
-2. 或 `POST /knowledge` 随时追加（同一 `source` 会覆盖旧片段）
-3. 用 `GET /knowledge/search?q=...` 检查有没有搜到
-
-已经生成过 `data/rag/index.json` 之后，只改 `data/knowledge/` 里的文件**不会**自动更新。要看到新内容：删掉 `data/rag/` 再启动，或走 `POST /knowledge`。
-
-试：`python main.py "年假有几天"`
 
 

@@ -153,6 +153,8 @@ class SearchTool(BaseTool):
 
 ### 切换到 AgentScope 2.0
 
+选修：先把手写 ReAct 和 RAG 走通，再切。见 README 第 20 节。
+
 ```python
 # .env: AGENT_BACKEND=agentscope
 from src.agents.factory import create_main_agent
