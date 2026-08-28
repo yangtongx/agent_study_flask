@@ -1,5 +1,7 @@
 """
 RAG 单元测试 — 向量化、切块、检索、RetrieveTool。不调用真实 LLM。
+
+persist_path=None：索引只在内存，测完即丢，不往 data/rag 写文件。
 """
 
 from __future__ import annotations
@@ -14,7 +16,11 @@ from src.tools.retrieve import RetrieveTool
 
 
 def test_similar_texts_have_higher_cosine():
-    """「年假有几天」应更接近年假制度，而不是算术说明。"""
+    """
+    「年假有几天」应更接近年假制度，而不是算术说明。
+
+    教学哈希靠字面重合：查询和制度都有「年假」，和乘法说明几乎没有共同 n-gram。
+    """
     leave = embed("正式员工每年享有 10 个工作日年假")
     query = embed("年假有几天")
     other = embed("用计算器做乘法 15 乘 23")
@@ -22,6 +28,7 @@ def test_similar_texts_have_higher_cosine():
 
 
 def test_chunk_text_splits_paragraphs():
+    """空行分段：两段之间有空行，应切成 2 块。"""
     text = "第一段内容。\n\n第二段也有一些字。"
     chunks = chunk_text(text, chunk_size=400)
     assert len(chunks) == 2
@@ -30,6 +37,7 @@ def test_chunk_text_splits_paragraphs():
 
 
 def test_vector_store_query_returns_best_hit():
+    """库里同时有年假和端口，问年假应命中带 10 的那段。"""
     store = VectorStore(persist_path=None)
     store.add(["年假每年 10 个工作日。", "HTTP 服务默认端口是 8000。"], source="demo")
     hits = store.query("年假几天", top_k=1)
@@ -39,6 +47,7 @@ def test_vector_store_query_returns_best_hit():
 
 
 def test_ingest_replace_same_source():
+    """同一 source 再灌入应覆盖：旧的「5 天」不能还在。"""
     store = VectorStore(persist_path=None)
     assert ingest_text("旧内容：年假 5 天", source="leave.md", store=store) >= 1
     ingest_text("新内容：年假 10 天", source="leave.md", store=store, replace=True)
@@ -50,6 +59,7 @@ def test_ingest_replace_same_source():
 
 @pytest.mark.asyncio
 async def test_retrieve_tool_formats_hits():
+    """工具返回给 LLM 的 Observation 里应带上来源和关键数字。"""
     store = VectorStore(persist_path=None)
     store.add(["病假每月不超过 3 天按全额工资发放。"], source="leave-policy.md")
     tool = RetrieveTool(store=store, top_k=1)
@@ -60,6 +70,7 @@ async def test_retrieve_tool_formats_hits():
 
 @pytest.mark.asyncio
 async def test_retrieve_tool_empty_query():
+    """空查询不能去检索，应返回明确错误，避免 embed("") 干扰。"""
     tool = RetrieveTool(store=VectorStore(persist_path=None))
     result = await tool.run("  ")
     assert "不能为空" in result

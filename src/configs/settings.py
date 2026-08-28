@@ -107,6 +107,8 @@ class Settings(BaseSettings):
     # =================================================================
     # Vector Store 相关配置
     # =================================================================
+    # 早期预留的 Chroma 路径，当前教学 RAG 用的是 rag_persist_path 下的 JSON。
+    # 保留此字段以免旧 .env 报「未知配置」（Settings extra="ignore" 其实也不会报）。
     chroma_persist_path: str = Field(
         default="./data/chroma",
         description="ChromaDB persistence path",

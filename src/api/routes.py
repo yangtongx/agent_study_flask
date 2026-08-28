@@ -102,6 +102,7 @@ def index():
 def health():
     """健康检查。"""
     db_ok = _ensure_db()
+    # 第一次访问会加载/灌入知识库，knowledge_chunks 反映当前段数
     store = get_vector_store()
     body = HealthResponse(
         status="ok",
@@ -212,6 +213,8 @@ def knowledge_ingest():
     """
     灌入知识。正文会被切块、向量化，写入全局知识库。
     之后 knowledge_agent 用 retrieve 就能搜到。
+
+    同一 source 再灌一次会覆盖旧片段（ingest_text 默认 replace=True）。
     """
     payload = request.get_json(silent=True)
     if not isinstance(payload, dict):
@@ -232,7 +235,13 @@ def knowledge_ingest():
 
 @bp.get("/knowledge/search")
 def knowledge_search():
-    """调试用：不经过 Agent，直接看检索命中了哪几段。"""
+    """
+    调试用：不经过 Agent，直接看检索命中了哪几段。
+
+    问「为什么 Agent 答错了」时，先打这个接口：
+    如果这里都搜不到，问题在知识库/切块/向量；
+    如果这里能搜到但聊天答错，问题在 LLM 没调用 retrieve。
+    """
     query = (request.args.get("q") or "").strip()
     if not query:
         return jsonify({"detail": "query parameter q is required"}), 422

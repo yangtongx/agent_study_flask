@@ -147,7 +147,7 @@ class CoordinatorAgent(ReactAgent):
         knowledge_agent = ReactAgent(
             name="KnowledgeAgent",
             llm_client=knowledge_llm,
-            tools=[RetrieveTool()],
+            tools=[RetrieveTool()],  # 只有知识专家能翻笔记，主管自己不直接 retrieve
             use_memory=False,
             role_prompt=KNOWLEDGE_ROLE,
             max_iterations=max_iterations,

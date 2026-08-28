@@ -56,14 +56,19 @@ class HealthResponse(BaseModel):
 
 
 class KnowledgeIngestRequest(BaseModel):
-    """灌入知识的请求。"""
+    """
+    灌入知识的请求。
+
+    content：正文，服务端会切块，不必自己先拆。
+    source：来源名。同一 source 再 POST 一次会覆盖旧内容。
+    """
 
     content: str = Field(..., min_length=1, max_length=100000, description="要写入知识库的正文")
     source: str | None = Field(default="api", description="来源标记，例如文件名")
 
 
 class KnowledgeIngestResponse(BaseModel):
-    """灌入结果。"""
+    """灌入结果：本次写了几段、现在库里一共几段。"""
 
     chunks: int = Field(description="本次新写入的片段数")
     source: str = Field(description="来源标记")
@@ -71,7 +76,11 @@ class KnowledgeIngestResponse(BaseModel):
 
 
 class KnowledgeSearchResponse(BaseModel):
-    """直接检索（不经过 Agent）的结果，方便调试 RAG。"""
+    """
+    直接检索（不经过 Agent）的结果，方便调试 RAG。
+
+    hits 里每一项含 id / source / score / text。
+    """
 
     query: str
     hits: list[dict]

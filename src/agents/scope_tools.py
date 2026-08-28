@@ -162,7 +162,11 @@ async def _retrieve(query: str) -> str:
 
 
 def retrieve_tool() -> AllowFunctionTool:
-    """把本项目的 RetrieveTool 包装成 AgentScope 工具。"""
+    """
+    把本项目的 RetrieveTool 包装成 AgentScope 工具。
+
+    参数名必须是 query：AgentScope 按关键字传参，不是手写版的一整段 args。
+    """
     return AllowFunctionTool(
         _retrieve,
         name="retrieve",

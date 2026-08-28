@@ -28,6 +28,10 @@ class FakeLLMClient:
 
 @pytest.mark.asyncio
 async def test_knowledge_agent_uses_retrieve_then_answers():
+    """
+    两层委派：主管只调用 knowledge_agent，知识专家再调用 retrieve。
+    假 LLM 按预定格式输出 Action；检索和数字 10 来自真实向量库。
+    """
     store = VectorStore(persist_path=None)
     store.add(["正式员工每年享有 10 个工作日年假。"], source="leave-policy.md")
 

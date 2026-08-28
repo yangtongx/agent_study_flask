@@ -220,21 +220,23 @@ HTTP 接口可以通过同一个 `session_id` 把多轮对话串起来（只主 
   main.py  或  server.py → routes.py
         │
         ▼
-   CoordinatorAgent.run(...)          ← 主 Agent
+   create_main_agent().run(...)     ← 主 Agent（handmade 或 agentscope）
         │
         ├── DelegateTool → MathAgent → CalculatorTool
         ├── DelegateTool → WriterAgent
+        ├── DelegateTool → KnowledgeAgent → RetrieveTool（RAG）
         └── DelegateTool → GeneralAgent
                 │
                 ▼
-         每个 Agent 内部都是 AgentLoop（ReAct 转圈）
+         每个 Agent 内部都是 AgentLoop（或 AgentScope 的 reply）
                 ├── LLM 思考
                 └── 工具或 Final Answer
 ```
 
 `CoordinatorAgent` / `ReactAgent` 是**外壳**：把零件拼好。  
 `AgentLoop` 才是**发动机**：按 ReAct 规则一轮一轮跑。  
-`DelegateTool` 让主 Agent 用调用工具的方式去调用子 Agent。
+`DelegateTool` 让主 Agent 用调用工具的方式去调用子 Agent。  
+`RetrieveTool` 让知识专家去翻向量库，和计算器一样都是「手」。
 
 ---
 
@@ -247,11 +249,11 @@ HTTP 接口可以通过同一个 `session_id` 把多轮对话串起来（只主 
 2. Pydantic 的 ChatRequest 校验：message 不能空，最长 10000 字
 3. routes.chat()
       - 没传 session_id → 自动生成一个 UUID
-      - get_or_create_agent(session_id) → 没有就新建 CoordinatorAgent
+      - get_or_create_agent(session_id) → 没有就 create_main_agent()
 4. asyncio.run(agent.run(message))
       - Flask 路由是同步的，Agent 内部是异步的，所以包一层 asyncio.run
 5. 主 Agent 的 AgentLoop
-      a. system prompt 告诉它：你是主管，有 math/writer/general 三个子 Agent
+      a. system prompt 告诉它：你是主管，有 math/writer/knowledge/general 四个子 Agent
       b. 加载这个 session 的历史
       c. LLM 可能输出 Action[math_agent](15 * 23)
       d. DelegateTool 调用 MathAgent.run(...)
@@ -262,7 +264,9 @@ HTTP 接口可以通过同一个 `session_id` 把多轮对话串起来（只主 
       { "answer": "...", "agent": "CoordinatorAgent", "iterations": 2, "session_id": "..." }
 ```
 
-命令行路径更短：`main.py` 直接 `CoordinatorAgent().run(...)`，不经过 Flask，也没有多 session 复用。
+问「年假有几天」时，第 5 步会变成 `Action[knowledge_agent](...)`，子 Agent 再 `Action[retrieve](...)`。
+
+命令行路径更短：`main.py` 直接 `create_main_agent().run(...)`，不经过 Flask，也没有多 session 复用。
 
 ---
 
@@ -329,9 +333,11 @@ python server.py
 | 地址 | 作用 |
 |---|---|
 | http://localhost:8000/ | 服务简介 |
-| http://localhost:8000/health | 健康检查（含数据库是否连上） |
+| http://localhost:8000/health | 健康检查（数据库、后端、知识库段数） |
 | http://localhost:8000/docs | 接口说明（JSON，浏览器打开就能看） |
 | `POST http://localhost:8000/chat` | 真正聊天 |
+| `POST http://localhost:8000/knowledge` | 灌入知识 |
+| `GET http://localhost:8000/knowledge/search?q=...` | 直接检索（调试 RAG） |
 
 `debug=True`：你改了 Python 代码，服务会自动重启，出错时显示调试页。这是开发模式，不要用在公网。
 
@@ -480,7 +486,7 @@ LLM 一次能吃的文字有上限。窗口 = 只保留最近 N 条。
 - HTTP：`get_or_create_agent(session_id)` 按会话缓存 Agent。
 - 同一 `session_id` → 同一份记忆。
 - 不同 `session_id` → 互不干扰。
-- CLI 的 `CoordinatorAgent()` 每次新建，相当于每次新开一个会话。
+- CLI 的 `create_main_agent()` 每次新建，相当于每次新开一个会话。
 
 相关文件：
 
@@ -502,9 +508,10 @@ LLM 一次能吃的文字有上限。窗口 = 只保留最近 N 条。
 2. `description`：出现在 system prompt 里，LLM 靠它决定「该不该用我」
 3. `run(args)`：真正执行，返回字符串，作为 Observation
 
-目前两类工具：
+目前三类工具：
 
 - `CalculatorTool`：数学专家用的真计算器
+- `RetrieveTool`：知识专家翻向量库（`Action[retrieve](年假天数)`）
 - `DelegateTool`：主 Agent 用来呼叫子 Agent（不是真的去网上搜，只是 `await 子Agent.run()`）
 
 计算器**不用** Python 的 `eval()`（`eval` 能执行任意代码，危险）。  
@@ -596,7 +603,7 @@ HTTP 层会把 `MaxIterationsError` 变成 508，其它未捕获异常变成 500
 
 它们不是垃圾，而是**预留扩展点**。想动手练习，最合适的作业就是：把 InputFilter、OutputFilter、ResponseCache 接到 `AgentLoop` 或 `routes` 上。
 
-`docs/architecture.md` 里画的依赖关系偏「目标架构」，和「此刻真实调用链」不完全一致。以本 README 第 5、6 节为准。
+`docs/architecture.md` 里画的依赖关系偏「给已经懂架构的人看的草图」。细节和逐步说明以本 README 第 5、6 节为准。
 
 ---
 
@@ -675,7 +682,7 @@ A：LLM 不一定每次都听话。system prompt 只是「强烈建议」。简�
 A：如果模型一直输出 Action 却不给 Final Answer，循环永不结束。`max_iterations` 是保险丝。
 
 **Q：CLI 第二句为什么不记得第一句？**  
-A：每次运行 `main.py` 都是新进程、新 `CoordinatorAgent`、新 `session_id`。要用记忆，请走 HTTP 并固定 `session_id`。
+A：每次运行 `main.py` 都是新进程、新 `create_main_agent()`、新 `session_id`。要用记忆，请走 HTTP 并固定 `session_id`。
 
 **Q：主 Agent 和子 Agent 会不会把对话记混？**  
 A：不会。只有主 Agent 开了会话记忆。子 Agent `use_memory=False`，每次被叫只处理这一次任务。
@@ -720,7 +727,7 @@ A：知识必须先在库里。确认 `data/knowledge/` 有文档，或用 `POST
 更偏「给已经懂架构的人看」的短文：
 
 - `docs/architecture.md` — 架构草图（含尚未接线的模块）
-- `docs/api.md` — Python 类接口和扩展示例
+- `docs/api.md` — Python 类接口、HTTP 一览、扩展示例
 
 ---
 
@@ -735,6 +742,7 @@ A：知识必须先在库里。确认 `data/knowledge/` 有文档，或用 `POST
 5. `session_id` 不传会怎样？传同一个又会怎样？
 6. PostgreSQL 挂了，服务还能不能聊？
 7. 想加一个「查天气」子 Agent，最少要改哪几个文件？
+8. 问「年假有几天」时，retrieve 和 Final Answer 分别是谁产生的？
 
 答不上来就回到第 4 节，对着源码再走一遍「一次对话的路径」。
 
@@ -751,6 +759,7 @@ AgentScope 版让你看到：**同样的主管 + 四个专家，换成官方框�
 | 循环 | `src/core/agent_loop.py` 自己解析文本 | `agentscope.agent.Agent.reply()` |
 | 工具调用 | LLM 写出 `Action[calculator](1+1)`，正则提取 | 模型原生 function calling（JSON Schema） |
 | 计算器 | `CalculatorTool` | 同一个计算器，用 `AllowFunctionTool` 包一层 |
+| 检索 | `RetrieveTool` | `retrieve_tool()` 同样包一层 |
 | 子 Agent | `DelegateTool` | `delegate_tool()` 里 `await sub_agent.reply(...)` |
 
 切换（改完重启 `python server.py` 或重新跑 `python main.py`）：
@@ -793,9 +802,11 @@ Final Answer：根据知识库，年假是 10 天。
 
 ### 怎么放知识
 
-1. 把 `.md` / `.txt` 放进 `data/knowledge/`（首次空库时自动灌入）
-2. 或 `POST /knowledge` 随时追加
+1. 把 `.md` / `.txt` 放进 `data/knowledge/`（**仅当索引还是空的**时自动灌入）
+2. 或 `POST /knowledge` 随时追加（同一 `source` 会覆盖旧片段）
 3. 用 `GET /knowledge/search?q=...` 检查有没有搜到
+
+已经生成过 `data/rag/index.json` 之后，只改 `data/knowledge/` 里的文件**不会**自动更新。要看到新内容：删掉 `data/rag/` 再启动，或走 `POST /knowledge`。
 
 试：`python main.py "年假有几天"`
 
