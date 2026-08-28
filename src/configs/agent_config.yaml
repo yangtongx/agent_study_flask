@@ -1,0 +1,24 @@
+# Agent 配置
+agent:
+  max_iterations: 10          # 最大推理循环次数
+  memory_window: 20           # 短期记忆窗口大小
+  debug: true                 # 调试模式
+
+# LLM 配置
+llm:
+  default_model: gpt-4o
+  temperature: 0.7            # 默认采样温度
+  max_tokens: 4096            # 最大输出 token
+  timeout: 60                 # 请求超时（秒）
+
+# 安全配置
+safety:
+  input_filter: true          # 启用输入过滤
+  output_filter: true         # 启用输出脱敏
+  max_input_length: 10000     # 最大输入字符数
+
+# 缓存配置
+cache:
+  enabled: true               # 启用响应缓存
+  ttl: 3600                   # 缓存存活时间（秒）
+  max_size: 1000              # 最大缓存条目

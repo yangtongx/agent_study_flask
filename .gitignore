@@ -1,0 +1,35 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+dist/
+build/
+.eggs/
+
+# Virtual Environment
+venv/
+.venv/
+env/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Environment
+.env
+.env.local
+
+# Tests
+.pytest_cache/
+
+# Data (运行时生成)
+data/chroma/
+data/logs/
+data/cache/
+
+# OS
+.DS_Store
+Thumbs.db
