@@ -21,6 +21,10 @@
 主 Agent 第 2 轮：Action[writer_agent](把 345 说成一句人话)
   └─ 子 Agent → 「15 乘 23 等于 345。」
 主 Agent 第 3 轮：Final Answer: ...
+
+=== 和 AgentScope 版的关系 ===
+这是 AGENT_BACKEND=handmade 时用的实现。
+同一张分工图的官方框架版见 scope_coordinator.py。
 """
 
 from __future__ import annotations
@@ -32,6 +36,12 @@ from src.tools.delegate import DelegateTool
 from src.utils.logger import get_logger
 
 logger = get_logger(__name__)
+
+# ---------------------------------------------------------------------------
+# 人设（role_prompt）
+# 会写进各自的 system prompt。注意：手写循环靠正则解析，
+# Thought / Action / Final Answer 这三个英文关键词必须保留。
+# ---------------------------------------------------------------------------
 
 MATH_ROLE = (
     "你是数学专家 MathAgent，专门做算术。"
@@ -67,7 +77,10 @@ class CoordinatorAgent(ReactAgent):
     """
     主 Agent：把用户任务分给子 Agent。
 
-    HTTP / 命令行入口创建的就是这个类。
+    继承 ReactAgent：外壳（组装 LLM / 工具 / 记忆）和循环都复用，
+    这里只负责「创建三个专家，再把他们包装成工具交给主管」。
+
+    HTTP / 命令行在 AGENT_BACKEND=handmade 时创建的就是这个类。
     """
 
     def __init__(
@@ -81,6 +94,16 @@ class CoordinatorAgent(ReactAgent):
         general_llm: BaseLLMClient | None = None,
         max_iterations: int = 10,
     ) -> None:
+        """
+        Args:
+            name: 主 Agent 名字，出现在日志和 /chat 的 agent 字段。
+            session_id: 会话 ID。只主 Agent 用来记对话；子 Agent 不记。
+            llm_client: 主管自己的 LLM。测试时可注入假客户端。
+            math_llm / writer_llm / general_llm: 三个专家各自的 LLM。
+                不传则每个 ReactAgent 自己用 LLMFactory 建一个真实客户端。
+            max_iterations: 主、子循环各自最多转几圈（保险丝）。
+        """
+        # use_memory=False：专家一次任务结束就忘，避免把「15*23」写进主管的会话历史
         math_agent = ReactAgent(
             name="MathAgent",
             llm_client=math_llm,
@@ -89,6 +112,7 @@ class CoordinatorAgent(ReactAgent):
             role_prompt=MATH_ROLE,
             max_iterations=max_iterations,
         )
+        # tools=[] 表示「没有工具」，不要传 None（None 会给默认计算器）
         writer_agent = ReactAgent(
             name="WriterAgent",
             llm_client=writer_llm,
@@ -106,12 +130,15 @@ class CoordinatorAgent(ReactAgent):
             max_iterations=max_iterations,
         )
 
+        # 给日志 /health 用：主 Agent 能调度谁
         self.sub_agents = {
             "math_agent": math_agent,
             "writer_agent": writer_agent,
             "general_agent": general_agent,
         }
 
+        # 主管自己：有记忆、工具是三个 DelegateTool
+        # DelegateTool 让 AgentLoop 以为自己在调普通工具，其实是在调子 Agent
         super().__init__(
             name=name,
             llm_client=llm_client,

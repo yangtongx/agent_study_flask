@@ -74,6 +74,9 @@ class Settings(BaseSettings):
     agent_max_iterations: int = Field(default=10, description="Max ReAct loop iterations")
     agent_memory_window: int = Field(default=20, description="Short-term memory window size")
     agent_debug: bool = Field(default=True, description="Enable debug logging")
+    # handmade = 手写 ReAct（自己解析 Thought/Action 文本，默认，方便测试注入假 LLM）
+    # agentscope = AgentScope 2.0 官方 Agent（原生 function calling）
+    # 对应环境变量 AGENT_BACKEND，非法值会在 factory.get_backend() 里回落到 handmade
     agent_backend: str = Field(
         default="handmade",
         description="Main agent backend: handmade (own ReAct) or agentscope (AgentScope 2.0)",

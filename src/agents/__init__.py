@@ -12,8 +12,10 @@ Agent（智能体）是一个能自主推理和行动的 AI 系统。
 === 这个文件做什么？===
 这是一个"包初始化"文件（__init__.py）。
 它的作用是：当你 `from src.agents import BaseAgent` 时，
-Python 会先执行这个文件，把 BaseAgent、ReactAgent 和 CoordinatorAgent 暴露出来。
+Python 会先执行这个文件，把常用类和工厂函数暴露出来。
 这样外部就不用写 `from src.agents.base_agent import BaseAgent` 这么长的路径了。
+
+create_main_agent 是推荐入口：按 AGENT_BACKEND 返回手写或 AgentScope 主 Agent。
 """
 
 # 从 base_agent 模块导入 BaseAgent 基类
@@ -22,4 +24,5 @@ from src.agents.coordinator_agent import CoordinatorAgent
 from src.agents.factory import create_main_agent
 from src.agents.react_agent import ReactAgent
 
+# __all__ 声明「from src.agents import *」时会导出哪些名字
 __all__ = ["BaseAgent", "ReactAgent", "CoordinatorAgent", "create_main_agent"]

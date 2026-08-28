@@ -48,8 +48,14 @@ class DelegateTool(BaseTool):
         return self._description
 
     async def run(self, args: str) -> str:
-        """把任务交给子 Agent，返回它的最终答案。"""
+        """
+        把任务交给子 Agent，返回它的最终答案。
+
+        前缀 [math_agent] 让主管在 Observation 里一眼看出是谁回的，
+        再决定要不要接着叫 writer_agent。
+        """
         logger.info("Delegate → %s: %s", self._name, args[:200])
+        # 子 Agent 自己再跑一轮完整的 ReAct（可能还会调 calculator）
         result = await self._agent.run(args)
         logger.info("Delegate ← %s: %s", self._name, str(result)[:200])
         return f"[{self._name}] {result}"

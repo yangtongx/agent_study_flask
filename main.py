@@ -63,6 +63,7 @@ async def main(user_input: str | None = None) -> None:
     logger.info("Starting agent with input: %s", user_input[:100])
 
     # 创建主 Agent。内部会带上三个子 Agent（数学、写作、通用）
+    # 具体是手写还是 AgentScope，看 .env 的 AGENT_BACKEND
     agent = create_main_agent()
 
     # 调用 agent 的 run 方法处理用户输入

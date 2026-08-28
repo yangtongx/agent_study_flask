@@ -52,6 +52,7 @@ class ReactAgent(BaseAgent):
             session_id: 会话 ID，传给记忆系统。
             use_memory: 子 Agent 一般设 False（一次任务一结束就忘，避免污染主对话）。
         """
+        # 记忆：显式传入 > 按 use_memory 自动建 > 不要记忆（子 Agent 常用）
         if memory is not None:
             resolved_memory = memory
         elif use_memory:
@@ -59,6 +60,10 @@ class ReactAgent(BaseAgent):
         else:
             resolved_memory = None
 
+        # tools 有三种含义，别搞混：
+        #   None  → 默认给计算器（单独用 ReactAgent 时最省事）
+        #   []    → 明确没有工具（写作/通用专家）
+        #   [..]  → 用你传入的列表
         if tools is None:
             resolved_tools = [CalculatorTool()]
         else:
@@ -66,12 +71,14 @@ class ReactAgent(BaseAgent):
 
         super().__init__(
             name=name,
+            # 没注入 LLM 就按 .env 建一个真实客户端
             llm_client=llm_client or LLMFactory.create(),
             tools=resolved_tools,
             memory=resolved_memory,
             max_iterations=max_iterations,
         )
 
+        # 真正转圈的是 AgentLoop；本类只是把零件拼好交给它
         self.loop = AgentLoop(
             llm_client=self.llm_client,
             tools=self.tools,
@@ -81,7 +88,11 @@ class ReactAgent(BaseAgent):
         )
 
     async def run(self, user_input: str) -> str:
-        """执行 ReAct 循环处理用户输入。"""
+        """
+        执行 ReAct 循环处理用户输入。
+
+        主 Agent、三个专家都走这个方法。差别只在构造时装备了什么工具和人设。
+        """
         logger.info("[%s] User input: %s", self.name, user_input[:200])
         result = await self.loop.execute(user_input)
         logger.info("[%s] Final answer: %s", self.name, result[:200])

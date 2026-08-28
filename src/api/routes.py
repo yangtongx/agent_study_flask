@@ -24,6 +24,7 @@ import uuid
 from flask import Blueprint, jsonify, request
 from pydantic import ValidationError
 
+# 工厂：按 AGENT_BACKEND 给出手写 Coordinator 或 AgentScope 主 Agent
 from src.agents.factory import MainAgent, create_main_agent, display_agent_name, get_backend
 from src.api.models import ChatRequest, ChatResponse, HealthResponse
 from src.database import init_db
@@ -77,7 +78,7 @@ def index():
         "name": "My Agent API",
         "version": "0.1.0",
         "mode": "multi-agent",
-        "backend": get_backend(),
+        "backend": get_backend(),  # handmade 或 agentscope，方便确认当前实现
         "endpoints": {
             "health": "GET /health",
             "chat": "POST /chat",
@@ -92,7 +93,7 @@ def health():
     db_ok = _ensure_db()
     body = HealthResponse(
         status="ok",
-        agent=display_agent_name(),
+        agent=display_agent_name(),  # CoordinatorAgent 或 ScopeCoordinator
         database="connected" if db_ok else "unavailable",
         sub_agents=["math_agent", "writer_agent", "general_agent"],
         backend=get_backend(),
@@ -112,7 +113,7 @@ def docs():
         "title": "My Agent API",
         "version": "0.1.0",
         "mode": "multi-agent",
-        "backend": get_backend(),
+        "backend": get_backend(),  # 当前是 handmade 还是 agentscope
         "framework": "Flask",
         "endpoints": [
             {

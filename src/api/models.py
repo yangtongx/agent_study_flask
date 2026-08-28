@@ -44,6 +44,7 @@ class HealthResponse(BaseModel):
         default_factory=list,
         description="主 Agent 可调度的子 Agent 名称",
     )
+    # 告诉调用方当前走的是手写 ReAct 还是 AgentScope，方便排查「怎么突然换了一套」
     backend: str = Field(
         default="handmade",
         description="主 Agent 实现：handmade 或 agentscope",
