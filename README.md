@@ -1,7 +1,8 @@
 # My Agent — 给初学者的完整说明书
 
 > 这份文档的目标只有一个：让你**从头到尾看懂这个项目**。  
-> 不假设你已经懂 Agent、ReAct、Flask。遇到专有名词会先用大白话解释，再对照代码。
+> 不假设你已经懂 Agent、ReAct、Flask。遇到专有名词会先用大白话解释，再对照代码。  
+> clone 默认停在 **main**（一个 Agent + 一把计算器）。学完本 README 后再按 [第 4 节](#4-建议阅读顺序) 切后续分支；**git 提交顺序 ≠ 学习顺序**。
 
 ---
 
@@ -30,7 +31,7 @@
 
 ## 1. 一句话：这项目是干什么的
 
-这是一个**教学用的 AI Agent 框架**。
+这是一个**教学用的 AI Agent 框架**。你现在看到的是第一阶：一个 Agent、一把计算器、手写 ReAct。后面还有多 Agent、RAG、选修 AgentScope，**怎么切分支见第 4 节**。
 
 普通聊天机器人：你问一句，模型直接回一句。
 
@@ -115,6 +116,24 @@ Action[calculator](15 * 23)
 
 ## 4. 建议阅读顺序
 
+### 4.1 整个仓库怎么学（clone 下来请先看这里）
+
+git 分支的**创建**顺序是：`main` → 多 Agent → AgentScope → RAG。  
+**学习不要按这个顺序。** AgentScope 是换发动机，比「再加一把检索工具」跳得大。按下面这条梯子走：
+
+| 阶 | 你要搞懂的 | 怎么切 | 到了之后看什么 |
+|---|---|---|---|
+| 1 | 一个 Agent、一把计算器、ReAct 怎么转 | 你已经在这（`main`） | 本 README + 下面这张读文件表 |
+| 2 | 主管分活；子 Agent 也是工具 | `git checkout feature/multi-agent` | 那个分支的 README |
+| 3 | 再多一只手：翻知识库（RAG） | `git checkout feature/rag` | 那个分支 README 的 RAG 一节 |
+| 4 | （选修）同一套分工，换官方框架 | 仍留在 `feature/rag`，`.env` 里 `AGENT_BACKEND=agentscope` | 那个分支 README 的 AgentScope 一节 |
+
+如果 `git checkout` 提示没有这个分支，先 `git fetch origin` 再切。
+
+不必每个历史分支都跑一遍：`feature/rag` 里已经包含多 Agent、RAG 和 AgentScope 的代码。但**不要一上来就 checkout `feature/rag` 或 `feature/agentscope-2`**——先把手写 ReAct 在 `main` 上看懂。切到 `feature/rag` 后默认保持 `AGENT_BACKEND=handmade`，先学 RAG，再选修 AgentScope。
+
+### 4.2 本分支（main）先读哪些文件
+
 别一上来把 `src/` 全部打开。按这个顺序读，每读一个文件就能多懂一层：
 
 | 顺序 | 文件 | 你将搞懂 |
@@ -122,9 +141,9 @@ Action[calculator](15 * 23)
 | 1 | 本 README | 全貌 |
 | 2 | `main.py` | 命令行怎么启动一轮对话 |
 | 3 | `server.py` | HTTP 服务怎么起来 |
-| 4 | `src/agents/react_agent.py` | Agent 外壳：组装 LLM、工具、记忆 |
-| 5 | `src/core/agent_loop.py` | **最重要**：ReAct 循环到底怎么转 |
-| 6 | `src/tools/calculator.py` | 一个工具长什么样 |
+| 4 | `src/core/agent_loop.py` | **最重要**：ReAct 循环到底怎么转 |
+| 5 | `src/tools/calculator.py` | 一个工具长什么样 |
+| 6 | `src/agents/react_agent.py` | Agent 外壳：组装 LLM、工具、记忆 |
 | 7 | `src/llm/openai_client.py` | 怎么把消息发给 DeepSeek |
 | 8 | `src/memory/manager.py` | 记忆怎么存、怎么读 |
 | 9 | `src/api/routes.py` | `/chat` 接口怎么接到 Agent |
@@ -612,6 +631,9 @@ A：每次运行 `main.py` 都是新进程、新 `ReactAgent`、新 `session_id`
 
 **Q：代码里又是 OpenAI 又是 DeepSeek？**  
 A：HTTP 协议按 OpenAI Chat Completions 来写；默认配置指向 DeepSeek。换兼容该协议的其它厂商，改 `.env` 即可。
+
+**Q：仓库里还有 `feature/multi-agent`、`feature/rag`，我该怎么切？**  
+A：见第 4 节。先把 `main` 看懂，再切 `feature/multi-agent`，然后 `feature/rag`。不要按 git 提交时间去切 AgentScope。`feature/rag` 里虽然也有 AgentScope，先学 RAG，`.env` 保持 `handmade`。
 
 ---
 
