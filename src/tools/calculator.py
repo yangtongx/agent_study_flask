@@ -75,9 +75,9 @@ class CalculatorTool(BaseTool):
     def description(self) -> str:
         """工具描述，LLM 看了这个才知道什么时候该用计算器。"""
         return (
-            "Perform mathematical calculations. "
-            "Input: a math expression like '2 + 3 * 4'. "
-            "Supports: +, -, *, /, //, %, **, parentheses."
+            "做数学计算。"
+            "参数：算术表达式，例如 '2 + 3 * 4'。"
+            "支持：+、-、*、/、//、%、** 和括号。"
         )
 
     async def run(self, args: str) -> str:
@@ -103,7 +103,7 @@ class CalculatorTool(BaseTool):
             return f"{args.strip()} = {result}"
         except Exception as e:
             # 任何错误都不抛异常，返回错误信息给 LLM
-            return f"Calculation error: {e}"
+            return f"计算失败：{e}"
 
     def _eval_node(self, node: ast.AST) -> float | int:
         """

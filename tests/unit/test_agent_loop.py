@@ -135,14 +135,14 @@ async def test_incomplete_thought_retry_allows_final_answer():
 
 def test_system_prompt_covers_identity_and_direct_answer():
     """
-    测试场景5：system prompt 要告诉模型自己叫 ReactAgent，
+    测试场景5：system prompt 要告诉模型自己的名字，
     简单问题（名字、闲聊）应直接 Final Answer，不要解释工具格式。
     """
     loop = AgentLoop(llm_client=FakeLLMClient([]), tools=[], max_iterations=1)
     prompt = loop._build_system_prompt()
 
-    assert "你是 ReactAgent" in prompt
-    assert "你的名字是 ReactAgent" in prompt
+    assert "小宝" in prompt
+    assert "你的名字是" in prompt
     assert "Final Answer" in prompt
     assert "Action[" in prompt
     assert "可用工具" in prompt

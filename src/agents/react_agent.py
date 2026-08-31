@@ -40,8 +40,8 @@ from src.llm.factory import LLMFactory
 # 导入记忆管理器
 from src.memory.manager import MemoryManager
 
-# 导入计算器工具（Agent 默认装备的工具）
-from src.tools.calculator import CalculatorTool
+# 默认工具列表：计算器 + 搜索 + fetch（加新工具只改 default_tools）
+from src.tools import default_tools
 
 # 导入日志
 from src.utils.logger import get_logger
@@ -76,12 +76,12 @@ class ReactAgent(BaseAgent):
         """
         # 调用父类 BaseAgent 的初始化，传入各种组件
         # LLMFactory.create() 用工厂模式创建一个 OpenAI 客户端
-        # [CalculatorTool()] 默认只装备计算器工具
+        # default_tools()：计算器 + 搜索 + fetch
         # MemoryManager() 创建记忆管理器
         super().__init__(
             name=name,
             llm_client=LLMFactory.create(),
-            tools=[CalculatorTool()],
+            tools=default_tools(),
             memory=MemoryManager(),
             max_iterations=10,
         )

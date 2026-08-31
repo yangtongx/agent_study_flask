@@ -15,7 +15,7 @@ from src.tools.calculator import CalculatorTool
 def test_load_prompt_reads_markdown():
     """能从 src/prompts/ 读到模板文件。"""
     text = load_prompt("system.md")
-    assert "ReactAgent" in text
+    assert "小宝" in text
     assert "{tool_descriptions}" in text
 
 
@@ -33,11 +33,28 @@ def test_build_system_prompt_injects_tools_and_examples():
     tool_desc = f"  - {tool.name}: {tool.description}"
     prompt = build_system_prompt(tool_desc)
 
-    assert "你是 ReactAgent" in prompt
+    assert "你是 小宝" in prompt
     assert "calculator" in prompt
     assert "{tool_descriptions}" not in prompt
     assert "Action[calculator]" in prompt
     assert "Final Answer" in prompt
+    assert "Action[fetch]" in prompt
+    assert "核实" in prompt
+
+
+def test_system_prompt_search_then_fetch_and_skip_identity_search():
+    """问身份不要搜；查资料要搜完再 fetch；算术走计算器。"""
+    text = load_prompt("system.md")
+    assert "不要调用 web_search 或 fetch" in text
+    assert "再 Action[fetch]" in text
+    assert "必须用 calculator" in text
+    assert "用户提问的语言" in text
+
+    examples = load_prompt("examples.md")
+    assert "不需要搜索" in examples
+    assert "Action[web_search]" in examples
+    assert "Action[fetch](https://www.python.org/downloads/)" in examples
+    assert "直接 fetch，不必先搜" in examples
 
 
 def test_build_task_prompt_wraps_user_input():

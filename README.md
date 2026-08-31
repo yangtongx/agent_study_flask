@@ -60,7 +60,7 @@
 | **LLM** | Large Language Model，大语言模型。就是 ChatGPT、DeepSeek 这类能生成文字的模型。本项目默认对接 **DeepSeek**（接口格式和 OpenAI 兼容）。 |
 | **Agent（智能体）** | 不只会说话，还会**自己决定调用工具**来完成任务的程序。 |
 | **ReAct** | Agent 的一种工作方式：Thought → Action → Observation，循环直到给出 Final Answer。 |
-| **Tool（工具）** | Agent 的「手」。现在项目里自带一个：计算器 `calculator`。 |
+| **Tool（工具）** | Agent 的「手」。计算器 `calculator`、搜索 `web_search`、读网页 `fetch`。 |
 | **Memory（记忆）** | 对话历史。没有记忆，Agent 下一句就忘了你刚才说了什么。 |
 | **session_id** | 一次对话的身份证。同一个 `session_id` = 同一段聊天记录。 |
 | **Prompt（提示词）** | 发给 LLM 的说明书，告诉它「你是谁、有哪些工具、必须按什么格式回答」。 |
@@ -164,9 +164,9 @@ agent_study_flask/
 │
 ├── src/                    全部业务代码
 │   ├── agents/             Agent「人设」：ReactAgent 继承 BaseAgent
-│   ├── core/               大脑引擎：AgentLoop（perceive → decide → act）
+│   ├── core/               大脑引擎：AgentState + StateGraph（perceive → decide → act）
 │   ├── llm/                怎么调用大模型
-│   ├── tools/              工具（目前只有计算器）
+│   ├── tools/              工具：计算器 + 网络搜索 + fetch
 │   ├── memory/             短期记忆 + 长期记忆（长期还是空壳）
 │   ├── database/           PostgreSQL：把对话存进数据库
 │   ├── api/                Flask 的路由和请求/响应格式
@@ -205,11 +205,12 @@ HTTP 接口可以通过同一个 `session_id` 把多轮对话串起来。
    ReactAgent.run(用户那句话)
         │
         ▼
-   AgentLoop.execute(...)          ← 真正转圈的地方
+   AgentLoop.execute(...)          ← 真正转圈的地方（LangGraph StateGraph）
         │
-        ├── LLMFactory.create() → OpenAIClient.chat()   ← 「想」
-        ├── CalculatorTool.run()                        ← 「做」
-        └── MemoryManager                               ← 「记」
+        ├── AgentState（messages / iteration / final_answer）  ← 「状态」
+        ├── LLMFactory.create() → OpenAIClient.chat()         ← 「想」
+        ├── CalculatorTool.run()                              ← 「做」
+        └── MemoryManager                                     ← 「记」
                  ├── ShortTermMemory（内存，最近 N 条）
                  └── ChatHistoryRepo（PostgreSQL，持久化）
 ```
@@ -233,16 +234,16 @@ HTTP 接口可以通过同一个 `session_id` 把多轮对话串起来。
       - Flask 路由是同步的，Agent 内部是异步的，所以包一层 asyncio.run
       - 内部调用 loop.execute(message)
 5. AgentLoop.execute()
-      a. 拼 system prompt（告诉 LLM：你是 ReAct Agent，有 calculator 工具）
-      b. 从 MemoryManager 取出这个 session 的历史消息
-      c. 组成 messages 列表发给 LLM：
-            [system, ...历史..., 当前用户这句话]
-      d. 进入 for 循环（最多 AGENT_MAX_ITERATIONS 次，默认 10）
-            LLM 回复
-            ├─ 匹配到 "Final Answer: xxx" → 存记忆，返回 xxx
-            ├─ 匹配到 "Action[名字](参数)" → 找工具并 run()，把结果当 Observation 再问 LLM
-            └─ 两种格式都没有 → 提醒 LLM 按格式说话，进入下一轮
-      e. 10 轮还没 Final Answer → 抛 MaxIterationsError → HTTP 508
+      a. 准备一份空的 AgentState（LangGraph 的共享状态）
+      b. perceive 节点：ChatPromptTemplate 拼 messages，经 reducer 写入 State
+      c. decide 节点：读 State["messages"] 调 LLM，只 return 新增的 assistant 消息
+      d. 条件边看 State：
+            ├─ final_answer 有值 → END，存记忆
+            ├─ 匹配到 Action → act 节点跑工具，Observation 再追加进 messages
+            ├─ 格式不完整 → retry 节点追加纠错提示
+            └─ 轮次用尽仍无答案 → MaxIterationsError → HTTP 508
+      节点绝不原地 messages.append；必须 return {"messages": [新消息]}，
+      由 append_messages 这个 reducer 合并。这就是 State 最要紧的一点。
 6. 返回 JSON：
       { "answer": "...", "agent": "ReactAgent", "iterations": 2, "session_id": "..." }
 ```
@@ -466,10 +467,19 @@ LLM 一次能吃的文字有上限。窗口 = 只保留最近 N 条。
 2. `description`：出现在 system prompt 里，LLM 靠它决定「该不该用我」
 3. `run(args)`：真正执行，返回字符串，作为 Observation
 
-目前唯一实现：`CalculatorTool`。
+目前实现：
 
-它**不用** Python 的 `eval()`（`eval` 能执行任意代码，危险）。  
+- `CalculatorTool`（`calculator`）：安全算术，不用 `eval()`。
+- `WebSearchTool`（`web_search`）：默认 **360 搜索**，没有有效结果再用 **必应中国**。
+  搜到链接后会 **fetch** 前几篇正文。
+- `FetchTool`（`fetch`）：对一个 http/https 链接做 GET，把 HTML 收成纯文本。
+
+百度/搜狗对脚本会出验证码页，不能当搜索结果用。
+
+计算器**不用** Python 的 `eval()`（`eval` 能执行任意代码，危险）。  
 做法是：把 `"2 + 3 * 4"` 解析成语法树（AST），只允许 `+ - * / // % **` 和正负号。遇到函数调用、`import` 就拒绝。
+
+搜索用项目里已有的 `httpx` 拉搜索页并解析标题/链接。`run()` 是 async，真正发请求在 `asyncio.to_thread` 里。测试里 monkeypatch `_search`，不会真的上网。
 
 `AgentLoop` 找工具的方式很直接：遍历 `self.tools`，名字对上就 `await tool.run(args)`。  
 工具不存在或算失败时，**不把整个请求打爆**，而是把错误字符串当作 Observation 还给 LLM，让它换策略。
@@ -567,9 +577,8 @@ HTTP 层会把 `MaxIterationsError` 变成 508，其它未捕获异常变成 500
 
 1. 在 `src/tools/` 新建文件，继承 `BaseTool`。
 2. 实现 `name`、`description`、`run`。
-3. 在创建 Agent 的地方把工具加进列表：
-   - CLI：`src/agents/react_agent.py` 的 `tools=[CalculatorTool(), 你的工具()]`
-   - HTTP：`src/api/routes.py` 的 `get_or_create_agent()` 里同样加上
+3. 把它加进 `src/tools/__init__.py` 的 `default_tools()`。
+   CLI（`react_agent.py`）和 HTTP（`routes.py`）都从这里取工具列表。
 
 `description` 要写清楚「干什么、参数长什么样」，否则 LLM 不知道什么时候该调用你。
 
@@ -582,12 +591,12 @@ HTTP 层会把 `MaxIterationsError` 变成 508，其它未捕获异常变成 500
 
 改 `src/prompts/` 下的 markdown，不必改循环代码。
 
-消息列表用 LangChain 的 `ChatPromptTemplate.from_messages` 拼出来：
+消息列表用 LangChain 的 `ChatPromptTemplate.from_messages` 拼出来，
+再交给 LangGraph 的 `AgentState`（`src/core/state.py`）在节点之间传递。
 
 `system`（人设 + 工具 + few-shot）→ `history` 占位 → `human`（当前输入）
 
-再转成 OpenAI 的 `[{"role", "content"}]`，交给现有的 httpx 客户端。  
-**只用它组装 messages，不用 LangChain Agent**；Thought / Action / Observation 循环仍是手写的。
+**只用 LangGraph 管 State 和图**，不用 LangChain Agent。Thought / Action / Observation 仍按 ReAct 手写在节点里。
 
 | 文件 | 作用 |
 |---|---|
@@ -613,6 +622,7 @@ pytest
 
 主要文件：
 
+- `tests/unit/test_state.py` — AgentState 与 messages reducer
 - `tests/unit/test_prompts.py` — ChatPromptTemplate 组装消息
 - `tests/unit/test_agent_loop.py` — 立刻给答案 / 超时抛错
 - `tests/unit/test_tools.py` — 计算器
@@ -664,6 +674,9 @@ A：见第 4 节。先把 `main` 看懂，再切 `feature/multi-agent`，然后 
 | 调大模型 | `src/llm/openai_client.py` |
 | 创建 LLM 客户端 | `src/llm/factory.py` |
 | 计算器 | `src/tools/calculator.py` |
+| 网络搜索 | `src/tools/web_search.py` |
+| 读网页 fetch | `src/tools/web_fetch.py` |
+| 默认工具列表 | `src/tools/__init__.py` 的 `default_tools()` |
 | 工具合同 | `src/tools/base_tool.py` |
 | 记忆调度 | `src/memory/manager.py` |
 | 读 .env | `src/configs/settings.py` |

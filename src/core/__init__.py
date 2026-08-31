@@ -14,5 +14,6 @@ Agent 也是这个过程，只不过每一步都由代码驱动。
 """
 
 from src.core.agent_loop import AgentLoop
+from src.core.state import AgentState, append_messages
 
-__all__ = ["AgentLoop"]
+__all__ = ["AgentLoop", "AgentState", "append_messages"]

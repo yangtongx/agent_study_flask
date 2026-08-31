@@ -43,7 +43,7 @@ class BaseTool(ABC):
         工具名称，用于 Action[name] 调用。
 
         必须是英文，不含空格，因为 LLM 输出的 Action[xxx] 要用它匹配。
-        例如 "calculator"、"search"、"weather"。
+        例如 "calculator"、"web_search"、"fetch"。
         """
         ...
 

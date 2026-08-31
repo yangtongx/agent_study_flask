@@ -3,18 +3,25 @@ Agent 认知循环 — perceive → decide → act → observe。
 
 === 这个文件是整个 Agent 的核心 ===
 
-AgentLoop 就是 Agent 的"大脑引擎"。它管理着 ReAct 循环：
+AgentLoop 就是 Agent 的"大脑引擎"。ReAct 规则没变，但转圈改由
+LangGraph 的 StateGraph 驱动：一份 AgentState 在节点之间传递。
 
     用户输入
         ↓
-    ┌─→ [Decide] LLM 推理：输出 Thought + Action 或 Final Answer
+    [perceive] 拼 messages 写入 State
+        ↓
+    ┌─→ [decide] 读 State["messages"]，调 LLM，只返回增量
     │     ↓
-    │   如果是 Final Answer → 返回结果，循环结束
+    │   final_answer 有值 → END
     │     ↓
-    │   [Act] 解析 Action，调用对应工具
+    │   [act] 调工具，把 Observation 追加进 State["messages"]
     │     ↓
-    │   [Observe] 把工具结果作为 Observation 回传给 LLM
-    └──← 重复
+    │   或 [retry] 追加格式纠错
+    └──← 回到 decide
+
+节点不要改 State 里的列表原地 append。正确做法是：
+    return {"messages": [新消息]}
+由 append_messages 这个 reducer 合并。
 
 === 为什么有 max_iterations？===
 如果 LLM 一直不输出 Final Answer，循环就停不下来。
@@ -23,29 +30,18 @@ max_iterations 是安全阀，超过就报错停止。
 
 from __future__ import annotations
 
-# re 是正则表达式模块，用于从 LLM 输出中提取 Action 和 Final Answer
 import re
-
-# dataclass 和 field 用于简化数据类的定义
 from dataclasses import dataclass, field
+from typing import Any, Literal
 
-# 导入 LLM 客户端基类
+from langgraph.graph import END, START, StateGraph
+
+from src.core.state import AgentState
 from src.llm.base_client import BaseLLMClient
-
-# 导入记忆管理器
 from src.memory.manager import MemoryManager
-
-# 导入工具基类
-from src.tools.base_tool import BaseTool
-
-# 导入自定义异常
-# MaxIterationsError: 超过最大迭代次数时抛出
-from src.utils.exceptions import MaxIterationsError
-
-# 导入提示词模板（人设、few-shot、任务包装、格式纠错都在 src/prompts/*.md）
 from src.prompts.loader import build_chat_messages, load_prompt
-
-# 导入日志
+from src.tools.base_tool import BaseTool
+from src.utils.exceptions import MaxIterationsError
 from src.utils.logger import get_logger
 
 logger = get_logger(__name__)
@@ -90,6 +86,11 @@ class AgentLoop:
     # 记录上次 execute() 实际执行了多少轮循环
     # 供 API 层查询并返回给调用方
     _iteration_count: int = field(default=0, repr=False)
+    # 编译好的 StateGraph。节点闭包里用 self，所以工具/LLM 变了仍读得到
+    _graph: Any = field(default=None, repr=False, init=False)
+
+    def __post_init__(self) -> None:
+        self._graph = self._compile_graph()
 
     async def execute(self, user_input: str) -> str:
         """
@@ -106,82 +107,111 @@ class AgentLoop:
         Raises:
             MaxIterationsError: 超过最大迭代次数。
         """
-        # ===== 第 1 步：感知（Perceive）=====
-        # 构建带 role 的消息列表：
-        # system（system.md + examples.md）+ 历史 + 当前用户输入（task.md）
-        # 由 ChatPromptTemplate.from_messages 组装，再转成 OpenAI dict
+        # 图的起点。nodes 只返回增量，messages 靠 reducer 越攒越长。
+        initial: AgentState = {
+            "messages": [],
+            "user_input": user_input,
+            "iteration": 0,
+            "last_response": "",
+            "final_answer": None,
+        }
+        # recursion_limit 是图跳数上限，不是 LLM 轮数。
+        # 一轮 ReAct 大约 perceive + decide + act，所以比 max_iterations 留几倍余量。
+        result = await self._graph.ainvoke(
+            initial,
+            {"recursion_limit": self.max_iterations * 4 + 8},
+        )
+        self._iteration_count = result["iteration"]
+        answer = result.get("final_answer")
+        if answer:
+            self._save_history(user_input, answer)
+            logger.info("Final answer at iteration %d", result["iteration"])
+            return answer
+        raise MaxIterationsError(
+            f"Agent exceeded max iterations ({self.max_iterations})"
+        )
+
+    def _compile_graph(self) -> Any:
+        """
+        把 ReAct 编成 StateGraph。
+
+        边：START → perceive → decide ⇄ act/retry → END
+        条件边读的是 State，不是节点返回值。
+        """
+        graph = StateGraph(AgentState)
+        graph.add_node("perceive", self._node_perceive)
+        graph.add_node("decide", self._node_decide)
+        graph.add_node("act", self._node_act)
+        graph.add_node("retry", self._node_retry)
+        graph.add_edge(START, "perceive")
+        graph.add_edge("perceive", "decide")
+        graph.add_conditional_edges(
+            "decide",
+            self._route_after_decide,
+            {"act": "act", "retry": "retry", "end": END},
+        )
+        graph.add_edge("act", "decide")
+        graph.add_edge("retry", "decide")
+        return graph.compile()
+
+    def _node_perceive(self, state: AgentState) -> dict:
+        """感知：拼第一份 messages。reducer 会把它接到空列表后面。"""
         tool_desc = "\n".join(
             f"  - {t.name}: {t.description}" for t in self.tools
         )
         messages = build_chat_messages(
             tool_descriptions=tool_desc,
             history=self._load_history(),
-            user_input=user_input,
+            user_input=state["user_input"],
         )
+        return {"messages": messages}
 
-        # ===== 第 2 步：循环（Decide → Act → Observe）=====
-        # range(1, self.max_iterations + 1) 生成 1, 2, 3, ..., max_iterations
-        for i in range(1, self.max_iterations + 1):
-            self._iteration_count = i  # 记录当前迭代轮数
-            logger.debug("Iteration %d/%d", i, self.max_iterations)
+    async def _node_decide(self, state: AgentState) -> dict:
+        """决策：调 LLM。只返回新增的 assistant 消息，不要把整份 messages 塞回去。"""
+        if state["iteration"] >= self.max_iterations:
+            return {}
 
-            # ----- 决策（Decide）-----
-            # 把所有消息发给 LLM，让它"思考"下一步该做什么
-            # LLM 会输出两种格式之一：
-            #   格式1: "Thought: ...\nAction[tool_name](args)"  → 需要调用工具
-            #   格式2: "Thought: ...\nFinal Answer: ..."           → 直接给答案
-            response = await self.llm_client.chat(messages)
+        iteration = state["iteration"] + 1
+        logger.debug("Iteration %d/%d", iteration, self.max_iterations)
+        response = await self.llm_client.chat(state["messages"])
 
-            # 把 LLM 的回复加入消息列表（这样下一轮 LLM 能看到自己上一轮说了什么）
-            messages.append({"role": "assistant", "content": response})
+        update: dict = {
+            "messages": [{"role": "assistant", "content": response}],
+            "last_response": response,
+            "iteration": iteration,
+        }
+        final_answer = self._extract_final_answer(response)
+        if final_answer is not None:
+            update["final_answer"] = final_answer
+            return update
+        if self._parse_action(response) is None and self._is_plain_reply(response):
+            update["final_answer"] = response.strip()
+        return update
 
-            # 检查 LLM 是否输出了 Final Answer
-            final_answer = self._extract_final_answer(response)
-            if final_answer is not None:
-                # LLM 给出了最终答案，保存对话到记忆，然后返回
-                self._save_history(user_input, final_answer)
-                logger.info("Final answer at iteration %d", i)
-                return final_answer
+    async def _node_act(self, state: AgentState) -> dict:
+        """行动+观察：跑工具，把 Observation 追加进 messages。"""
+        action = self._parse_action(state["last_response"])
+        if action is None:
+            return {"last_response": ""}
+        observation = await self._execute_action(action)
+        return {
+            "messages": [{"role": "user", "content": f"Observation: {observation}"}],
+            "last_response": "",
+        }
 
-            # ----- 执行（Act）-----
-            # 尝试从 LLM 输出中解析出 Action[tool_name](args)
-            action = self._parse_action(response)
-            if action is None:
-                # 没有 Action。可能是：
-                # 1) 模型直接用自然语言答了（常见于「你叫什么」这类闲聊）
-                # 2) 只写了 Thought，ReAct 格式不完整
-                #
-                # 以前这里只注入 "Please use the format: Action[tool_name](args)"，
-                # 模型会把这条 user 消息当成新问题，开始解释格式，丢掉原问题。
-                if self._is_plain_reply(response):
-                    answer = response.strip()
-                    self._save_history(user_input, answer)
-                    logger.info("Plain reply accepted as final answer at iteration %d", i)
-                    return answer
+    def _node_retry(self, state: AgentState) -> dict:
+        """格式不完整：追加纠错提示，下一轮 decide 继续答原来的问题。"""
+        return {"messages": [{"role": "user", "content": load_prompt("retry.md")}]}
 
-                messages.append({
-                    "role": "user",
-                    "content": load_prompt("retry.md"),
-                })
-                continue  # 跳过本轮，进入下一轮循环
-
-            # 解析成功，执行工具调用
-            # action 是一个元组 (tool_name, args)，例如 ("calculator", "15 * 23")
-            observation = await self._execute_action(action)
-
-            # ----- 观察（Observe）-----
-            # 把工具执行结果作为 Observation 传回给 LLM
-            # LLM 看到 Observation 后，会在下一轮决定是继续调用工具还是给出答案
-            messages.append({
-                "role": "user",
-                "content": f"Observation: {observation}",
-            })
-
-        # 循环结束还没返回，说明超过了最大迭代次数
-        # 这是一个安全机制，防止 Agent 陷入无限循环
-        raise MaxIterationsError(
-            f"Agent exceeded max iterations ({self.max_iterations})"
-        )
+    def _route_after_decide(self, state: AgentState) -> Literal["act", "retry", "end"]:
+        """根据 State 决定下一跳。这就是 LangGraph 的条件边。"""
+        if state.get("final_answer"):
+            return "end"
+        if self._parse_action(state["last_response"]):
+            return "act"
+        if state["iteration"] >= self.max_iterations:
+            return "end"
+        return "retry"
 
     def _build_system_prompt(self) -> str:
         """

@@ -28,7 +28,7 @@ from src.agents.react_agent import ReactAgent
 from src.api.models import ChatRequest, ChatResponse, HealthResponse
 from src.core.agent_loop import AgentLoop
 from src.database import init_db
-from src.tools.calculator import CalculatorTool
+from src.tools import default_tools
 from src.utils.exceptions import MaxIterationsError
 from src.utils.logger import get_logger
 
@@ -76,7 +76,7 @@ def get_or_create_agent(session_id: str) -> ReactAgent:
 
         BaseAgent.__init__(agent, name="ReactAgent")
         agent.llm_client = LLMFactory.create()
-        agent.tools = [CalculatorTool()]
+        agent.tools = default_tools()
         agent.memory = MemoryManager(session_id=session_id)
         agent.max_iterations = 10
         agent.loop = AgentLoop(

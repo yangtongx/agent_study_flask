@@ -13,6 +13,7 @@ import pytest
 
 from src.core.agent_loop import AgentLoop
 from src.tools.calculator import CalculatorTool
+from src.tools.web_search import WebSearchTool
 
 
 class MockLLMClient:
@@ -59,3 +60,46 @@ async def test_react_agent_e2e():
 
     # 最终答案中应该包含 345
     assert "345" in result
+
+
+class MockSearchLLMClient:
+    """第一轮搜网，第二轮根据 Observation 给答案。"""
+
+    def __init__(self) -> None:
+        self.call_count = 0
+
+    async def chat(self, messages: list[dict], **kwargs) -> str:
+        self.call_count += 1
+        if self.call_count == 1:
+            return (
+                "Thought: Need current info.\n"
+                "Action[web_search](Python 3.13 release date)"
+            )
+        return (
+            "Thought: Search returned the date.\n"
+            "Final Answer: Python 3.13.0 was released on October 7, 2024."
+        )
+
+
+@pytest.mark.asyncio
+async def test_react_agent_web_search_e2e(monkeypatch):
+    """端到端：解析 Action[web_search] → 工具 Observation → Final Answer。"""
+
+    def fake_search(self, query: str) -> list[dict]:
+        assert "Python 3.13" in query
+        return [
+            {
+                "title": "Python 3.13.0",
+                "href": "https://www.python.org/downloads/",
+                "body": "Python 3.13.0 was released on October 7, 2024.",
+            }
+        ]
+
+    monkeypatch.setattr(WebSearchTool, "_search", fake_search)
+    loop = AgentLoop(
+        llm_client=MockSearchLLMClient(),
+        tools=[WebSearchTool()],
+        max_iterations=5,
+    )
+    result = await loop.execute("When was Python 3.13 released?")
+    assert "October 7, 2024" in result
