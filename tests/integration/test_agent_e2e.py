@@ -58,8 +58,11 @@ async def test_react_agent_e2e():
     # 执行完整流程
     result = await loop.execute("What is 15 * 23?")
 
-    # 最终答案中应该包含 345
+    # 最终答案中应该包含 345，Thought 也要给用户看到
     assert "345" in result
+    assert "Thought:" in result
+    assert "I need to calculate" in result
+    assert "Got the result" in result
 
 
 class MockSearchLLMClient:

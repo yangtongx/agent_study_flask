@@ -25,6 +25,7 @@ import sys
 from src.agents.react_agent import ReactAgent
 
 # 从工具模块导入日志函数，用于打印调试信息
+from src.utils.langsmith_setup import apply_langsmith_env
 from src.utils.logger import get_logger
 
 # 创建当前模块的 logger，__name__ 是当前文件名（main）
@@ -62,6 +63,8 @@ async def main(user_input: str | None = None) -> None:
     # 记录日志：把用户输入的前 100 个字符打印出来，方便调试
     # %s 是日志格式化占位符，会被 user_input[:100] 替换
     logger.info("Starting agent with input: %s", user_input[:100])
+
+    apply_langsmith_env()
 
     # 创建一个 ReactAgent 实例
     # ReactAgent 内部会自动初始化 LLM 客户端、工具列表、记忆系统

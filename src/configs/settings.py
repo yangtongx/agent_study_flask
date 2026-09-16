@@ -91,6 +91,27 @@ class Settings(BaseSettings):
         description="ChromaDB persistence path",
     )
 
+    # =================================================================
+    # LangSmith（把 LangGraph 节点画到网页上，可选）
+    # =================================================================
+    # 打开后：https://smith.langchain.com 能看到 perceive / decide / act
+    langsmith_tracing: bool = Field(
+        default=False,
+        description="Upload LangGraph traces to LangSmith",
+    )
+    langsmith_api_key: str = Field(
+        default="",
+        description="LangSmith API key (from smith.langchain.com/settings)",
+    )
+    langsmith_project: str = Field(
+        default="agent-study-flask",
+        description="LangSmith project name",
+    )
+    langsmith_endpoint: str = Field(
+        default="",
+        description="LangSmith API URL; empty = US default",
+    )
+
 
 @lru_cache
 def get_settings() -> Settings:

@@ -30,6 +30,9 @@ from src.llm.base_client import BaseLLMClient
 # 导入自定义异常
 from src.utils.exceptions import LLMError
 
+# LangSmith：把这一次 LLM 调用画成 Trace 里的 llm.chat 节点
+from src.utils.langsmith_setup import llm_traceable
+
 # 导入日志
 from src.utils.logger import get_logger
 
@@ -56,6 +59,7 @@ class OpenAIClient(BaseLLMClient):
         self.model = settings.llm_model
         logger.info("LLM client initialized: model=%s, base_url=%s", self.model, self.base_url)
 
+    @llm_traceable
     async def chat(
         self,
         messages: list[dict],

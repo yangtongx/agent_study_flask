@@ -69,8 +69,10 @@ async def test_final_answer_immediate():
     # 执行
     result = await loop.execute("What is the answer?")
 
-    # 断言：结果应该是 "42"
-    assert result == "42"
+    # 断言：结果里既有 Thought 也有最终数字
+    assert "Thought:" in result
+    assert "easy" in result
+    assert "42" in result
 
 
 @pytest.mark.asyncio
@@ -159,3 +161,12 @@ async def test_execute_wraps_user_input_with_task_template():
     user_msg = client.calls[0][-1]["content"]
     assert "你叫什么" in user_msg
     assert "用户输入" in user_msg
+
+
+def test_extract_thought_stops_before_action():
+    """Thought 应停在 Action / Final Answer 之前，不要把工具调用吞进去。"""
+    text = "Thought: 需要计算。\nAction[calculator](15 * 23)"
+    assert AgentLoop._extract_thought(text) == "需要计算。"
+    final = "Thought: 算出来了。\nFinal Answer: 345"
+    assert AgentLoop._extract_thought(final) == "算出来了。"
+    assert AgentLoop._extract_thought("我叫小宝。") is None

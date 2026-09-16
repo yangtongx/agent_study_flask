@@ -28,7 +28,7 @@ class ChatRequest(BaseModel):
 class ChatResponse(BaseModel):
     """聊天响应模型。"""
 
-    answer: str = Field(description="Agent 的最终回复")
+    answer: str = Field(description="给用户看的回复：本轮 Thought（如有）+ 最终答案")
     agent: str = Field(description="处理此请求的 Agent 名称")
     iterations: int = Field(description="ReAct 循环执行的迭代次数")
     session_id: str = Field(description="本次对话的会话 ID（下次传入可延续上下文）")

@@ -85,6 +85,7 @@ def test_chat(client):
     assert resp.status_code == 200
     data = resp.get_json()
     assert "345" in data["answer"]
+    assert "Thought:" in data["answer"]
     assert data["agent"] == "ReactAgent"
     assert data["session_id"] == "test-session-1"
     assert data["iterations"] >= 1

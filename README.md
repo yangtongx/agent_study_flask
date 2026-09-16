@@ -340,8 +340,13 @@ python server.py
 | `AGENT_DEBUG` | 是否打更详细日志 | `true` |
 | `PG_URI` | PostgreSQL 连接串 | `postgresql://用户:密码@主机:5432/库名` |
 | `CHROMA_PERSIST_PATH` | 向量库路径（长期记忆预留） | `./data/chroma` |
+| `LANGSMITH_TRACING` | 是否把 LangGraph 节点上传到 LangSmith | `false` |
+| `LANGSMITH_API_KEY` | LangSmith 密钥（[Settings](https://smith.langchain.com/settings) 里创建） | `lsv2_pt_...` |
+| `LANGSMITH_PROJECT` | 网页上的项目名 | `agent-study-flask` |
 
 DeepSeek 的接口和 OpenAI 的 Chat Completions 格式兼容，所以代码类名叫 `OpenAIClient`，实际可以连 DeepSeek。换别的兼容服务时，通常只改 `LLM_BASE_URL`、`LLM_API_KEY`、`LLM_MODEL`。
+
+**想在 LangSmith 里看节点：** `.env` 里 `LANGSMITH_TRACING=true` 并填入 Key，重启 `server.py`，再发一轮 `/chat`。打开 [smith.langchain.com](https://smith.langchain.com) → 项目 `agent-study-flask` → 点进那条 Trace。应能看到 `perceive` → `decide` → `act`（计算器）→ `decide`。账号若在欧盟，还要设 `LANGSMITH_ENDPOINT=https://eu.api.smith.langchain.com`。
 
 **PostgreSQL 不是必须的。** 连不上时，记忆只存在内存里，进程一关就没了。HTTP 的 `/health` 里 `database` 会显示 `unavailable`，聊天功能仍可使用。
 
@@ -380,12 +385,14 @@ DeepSeek 的接口和 OpenAI 的 Chat Completions 格式兼容，所以代码类
 
 ```json
 {
-  "answer": "15 * 23 = 345",
+  "answer": "Thought: 需要计算。\nThought: 已经得到结果。\n\n15 * 23 = 345",
   "agent": "ReactAgent",
   "iterations": 2,
   "session_id": "xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"
 }
 ```
+
+`answer` 前面会带上本轮的 **Thought**（模型在想什么），后面才是最终答案。写入记忆的仍是纯答案，避免下一轮被推理过程干扰。
 
 `iterations` 表示这次为了得出答案，LLM 被调用了几轮。  
 算一道题通常是 2：第一轮调计算器，第二轮给出 Final Answer。
@@ -654,6 +661,9 @@ A：每次运行 `main.py` 都是新进程、新 `ReactAgent`、新 `session_id`
 
 **Q：代码里又是 OpenAI 又是 DeepSeek？**  
 A：HTTP 协议按 OpenAI Chat Completions 来写；默认配置指向 DeepSeek。换兼容该协议的其它厂商，改 `.env` 即可。
+
+**Q：LangSmith 里看不到 perceive / decide / act？**  
+A：`.env` 里 `LANGSMITH_TRACING` 必须是 `true`，`LANGSMITH_API_KEY` 不能空，改完**重启**服务再聊一轮。打开 https://smith.langchain.com 选项目 `LANGSMITH_PROJECT`（默认 `agent-study-flask`），点那条 Trace 切到 Details。没装 `langsmith` 时执行 `pip install -e ".[dev]"`。
 
 **Q：仓库里还有 `feature/multi-agent`、`feature/rag`，我该怎么切？**  
 A：见第 4 节。先把 `main` 看懂，再切 `feature/multi-agent`，然后 `feature/rag`。不要按 git 提交时间去切 AgentScope。`feature/rag` 里虽然也有 AgentScope，先学 RAG，`.env` 保持 `handmade`。

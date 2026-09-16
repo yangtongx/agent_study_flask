@@ -18,6 +18,7 @@ HTTP 服务入口 — 启动 Agent API 服务。
 from flask import Flask
 
 from src.api.routes import bp
+from src.utils.langsmith_setup import apply_langsmith_env
 from src.utils.logger import get_logger
 
 logger = get_logger(__name__)
@@ -31,6 +32,7 @@ def create_app() -> Flask:
     """
     application = Flask(__name__)
     application.register_blueprint(bp)
+    apply_langsmith_env()
     return application
 
 

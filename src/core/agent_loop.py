@@ -42,6 +42,7 @@ from src.memory.manager import MemoryManager
 from src.prompts.loader import build_chat_messages, load_prompt
 from src.tools.base_tool import BaseTool
 from src.utils.exceptions import MaxIterationsError
+from src.utils.langsmith_setup import apply_langsmith_env, run_tool_traced
 from src.utils.logger import get_logger
 
 logger = get_logger(__name__)
@@ -69,7 +70,8 @@ class AgentLoop:
     第 2 轮循环：
         messages = [系统提示词, 用户问题, LLM回复, Observation]
         → LLM 输出: "Thought: 算出来了\nFinal Answer: 15 * 23 = 345"
-        → 检测到 Final Answer，返回 "15 * 23 = 345"
+        → 检测到 Final Answer，把 Thought 和答案一起返回给用户
+        → 记忆里只存 "15 * 23 = 345"
 
     Attributes:
         llm_client: LLM 客户端，用于调用大模型 API。
@@ -102,7 +104,8 @@ class AgentLoop:
             user_input: 用户输入文本。
 
         Returns:
-            Agent 最终回复。
+            给用户看的回复：本轮 Thought（如有）+ 最终答案。
+            写入记忆的仍是纯最终答案。
 
         Raises:
             MaxIterationsError: 超过最大迭代次数。
@@ -115,18 +118,25 @@ class AgentLoop:
             "last_response": "",
             "final_answer": None,
         }
+        # 把 .env 里的 LangSmith 开关写进环境变量，图节点才会出现在网页上
+        apply_langsmith_env()
         # recursion_limit 是图跳数上限，不是 LLM 轮数。
         # 一轮 ReAct 大约 perceive + decide + act，所以比 max_iterations 留几倍余量。
         result = await self._graph.ainvoke(
             initial,
-            {"recursion_limit": self.max_iterations * 4 + 8},
+            {
+                "recursion_limit": self.max_iterations * 4 + 8,
+                "run_name": "AgentLoop",
+                "tags": ["react", "agent-study-flask"],
+            },
         )
         self._iteration_count = result["iteration"]
         answer = result.get("final_answer")
         if answer:
+            # 记忆只存最终答案，避免下一轮把 Thought 当成对话内容。
             self._save_history(user_input, answer)
             logger.info("Final answer at iteration %d", result["iteration"])
-            return answer
+            return self._visible_answer(result.get("messages") or [], answer)
         raise MaxIterationsError(
             f"Agent exceeded max iterations ({self.max_iterations})"
         )
@@ -152,7 +162,8 @@ class AgentLoop:
         )
         graph.add_edge("act", "decide")
         graph.add_edge("retry", "decide")
-        return graph.compile()
+        # name 会出现在 LangSmith 这条 Trace 的标题上
+        return graph.compile(name="ReactAgent")
 
     def _node_perceive(self, state: AgentState) -> dict:
         """感知：拼第一份 messages。reducer 会把它接到空列表后面。"""
@@ -174,6 +185,7 @@ class AgentLoop:
         iteration = state["iteration"] + 1
         logger.debug("Iteration %d/%d", iteration, self.max_iterations)
         response = await self.llm_client.chat(state["messages"])
+        self._print_thought(response)
 
         update: dict = {
             "messages": [{"role": "assistant", "content": response}],
@@ -194,6 +206,8 @@ class AgentLoop:
         if action is None:
             return {"last_response": ""}
         observation = await self._execute_action(action)
+        logger.info("Action[%s](%s)", action[0], action[1])
+        logger.info("Observation: %s", observation)
         return {
             "messages": [{"role": "user", "content": f"Observation: {observation}"}],
             "last_response": "",
@@ -262,6 +276,53 @@ class AgentLoop:
             return
         self.memory.add_message("user", user_input)
         self.memory.add_message("assistant", answer)
+
+    def _print_thought(self, response: str) -> None:
+        """每一轮 LLM 输出都把 Thought 打到日志，方便对照 ReAct 在想什么。"""
+        thought = self._extract_thought(response)
+        if thought:
+            logger.info("Thought: %s", thought)
+        else:
+            logger.info("LLM: %s", response.strip()[:500])
+
+    def _visible_answer(self, messages: list[dict], final_answer: str) -> str:
+        """
+        给用户看的回复：先列出本轮所有 Thought，再给最终答案。
+
+        CLI 的 print 和 HTTP 的 answer 都走这里。
+        """
+        thoughts: list[str] = []
+        seen: set[str] = set()
+        for msg in messages:
+            if msg.get("role") != "assistant":
+                continue
+            thought = self._extract_thought(str(msg.get("content") or ""))
+            if thought and thought not in seen:
+                seen.add(thought)
+                thoughts.append(thought)
+        if not thoughts:
+            return final_answer
+        lines = [f"Thought: {item}" for item in thoughts]
+        lines.append("")
+        lines.append(final_answer)
+        return "\n".join(lines)
+
+    @staticmethod
+    def _extract_thought(response: str) -> str | None:
+        """
+        抽出 Thought: 后面、Action / Final Answer 之前的那段推理。
+
+        没有 Thought 标记时返回 None（纯自然语言回复）。
+        """
+        match = re.search(
+            r"(?i)Thought:\s*(.+?)(?=\n\s*(?:Action\[|Final Answer:)|$)",
+            response,
+            re.DOTALL,
+        )
+        if not match:
+            return None
+        text = match.group(1).strip()
+        return text or None
 
     @staticmethod
     def _extract_final_answer(response: str) -> str | None:
@@ -364,7 +425,7 @@ class AgentLoop:
         try:
             # 调用工具的 run 方法执行操作
             # await 因为 run 是异步方法
-            result = await tool.run(args)
+            result = await run_tool_traced(tool_name, args, tool.run)
             return str(result)
         except Exception as e:
             # 工具执行失败，记录错误并返回错误信息

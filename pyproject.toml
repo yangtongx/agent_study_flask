@@ -18,6 +18,7 @@ dependencies = [
     "psycopg2-binary>=2.9",
     "langchain-core>=0.3",
     "langgraph>=0.2",
+    "langsmith>=0.3",
 ]
 
 [project.optional-dependencies]
